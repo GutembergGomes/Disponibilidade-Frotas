@@ -324,6 +324,30 @@
   </div>
 </div>
 
+<div id="modal-horario-agente" class="modal-horario-agente" aria-hidden="true" style="display: none;">
+  <div class="modal-horario-card" role="dialog" aria-modal="true" aria-labelledby="modal-horario-titulo">
+    <div class="modal-horario-header">
+      <div>
+        <h2 id="modal-horario-titulo">Horário do equipamento</h2>
+        <p id="modal-horario-descricao">Informe a data e hora do evento.</p>
+      </div>
+      <button class="modal-fechar" type="button" onclick="cancelarHorarioAgente()" aria-label="Fechar">×</button>
+    </div>
+
+    <div id="modal-horario-resumo" class="modal-horario-resumo"></div>
+
+    <label class="campo-formulario modal-horario-campo">
+      <span>Data e hora</span>
+      <input type="datetime-local" id="modal-horario-input">
+    </label>
+
+    <div class="modal-horario-acoes">
+      <button id="modal-horario-confirmar" type="button" onclick="confirmarHorarioAgente()">Confirmar</button>
+      <button class="btn-secondary" type="button" onclick="cancelarHorarioAgente()">Cancelar</button>
+    </div>
+  </div>
+</div>
+
     <div class="relatorio-header">
   <h2 id="titulo-relatorio">Relatório de Reboques para WhatsApp</h2>
 
