@@ -808,6 +808,88 @@ td.status-pendente {
   margin-top: 14px;
 }
 
+.modal-horario-agente {
+  position: fixed;
+  inset: 0;
+  z-index: 1000;
+  align-items: center;
+  justify-content: center;
+  padding: 18px;
+  background: rgba(15, 23, 42, 0.48);
+  backdrop-filter: blur(4px);
+}
+
+.modal-horario-card {
+  width: min(480px, 100%);
+  padding: 20px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  box-shadow: 0 28px 70px rgba(15, 23, 42, 0.24);
+}
+
+.modal-horario-header {
+  display: flex;
+  justify-content: space-between;
+  gap: 14px;
+  align-items: flex-start;
+  margin-bottom: 14px;
+}
+
+.modal-horario-header h2 {
+  margin: 0 0 4px 0;
+  color: var(--text);
+  font-size: 22px;
+}
+
+.modal-horario-header p {
+  margin: 0;
+  color: var(--muted);
+  font-weight: 750;
+}
+
+.modal-fechar {
+  width: 36px;
+  height: 36px;
+  padding: 0;
+  border-radius: 50%;
+  background: var(--surface-soft);
+  color: var(--muted);
+  font-size: 26px;
+  line-height: 1;
+}
+
+.modal-fechar:hover {
+  background: var(--danger-soft);
+  color: var(--danger);
+}
+
+.modal-horario-resumo {
+  margin: 0 0 14px 0;
+  padding: 12px;
+  background: var(--surface-soft);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  color: var(--text);
+  font-weight: 850;
+  white-space: pre-line;
+}
+
+.modal-horario-campo {
+  margin-bottom: 16px;
+}
+
+.modal-horario-campo input {
+  width: 100%;
+}
+
+.modal-horario-acoes {
+  display: flex;
+  gap: 10px;
+  justify-content: flex-end;
+  flex-wrap: wrap;
+}
+
 .relatorio-header {
   margin-top: 26px;
 }
@@ -1010,6 +1092,10 @@ body.dark-mode th {
 
   button {
     width: 100%;
+  }
+
+  .modal-fechar {
+    width: 36px;
   }
 
   .equipamento-frente {
