@@ -7,6 +7,7 @@ let graficoDisponibilidadeStatus = null;
 let graficoDisponibilidadeTipos = null;
 let graficosDisponibilidadeFrentes = [];
 let confirmacaoMassa = null;
+let confirmacaoHorarioAgente = null;
 
 let equipamentosCarregados = [];
 let historicoCarregado = [];
@@ -195,6 +196,218 @@ function obterDataParadoParaStatus(status, inputId, valorAtual = "") {
   }
 
   return obterDataHoraInputComoISO(inputId) || valorAtual || obterAgoraISO();
+}
+
+function interpretarHorarioTexto(textoHorario) {
+  const texto = (textoHorario || "").toString().trim().toLowerCase();
+  const match = texto.match(/^(\d{1,2})(?::(\d{2})|h(\d{0,2}))?$/);
+
+  if (!match) {
+    return null;
+  }
+
+  const hora = Number(match[1]);
+  const minuto = Number(match[2] || match[3] || 0);
+
+  if (hora > 23 || minuto > 59) {
+    return null;
+  }
+
+  return { hora, minuto };
+}
+
+function interpretarDataParadaTexto(textoData) {
+  const hoje = new Date();
+  const texto = normalizarTexto(textoData || "hoje");
+
+  if (!texto || texto === "hoje") {
+    return new Date(hoje.getFullYear(), hoje.getMonth(), hoje.getDate());
+  }
+
+  if (texto === "ontem") {
+    return new Date(hoje.getFullYear(), hoje.getMonth(), hoje.getDate() - 1);
+  }
+
+  const dataISO = texto.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+
+  if (dataISO) {
+    const [, ano, mes, dia] = dataISO;
+    return new Date(Number(ano), Number(mes) - 1, Number(dia));
+  }
+
+  const dataBR = texto.match(/^(\d{1,2})\/(\d{1,2})(?:\/(\d{2,4}))?$/);
+
+  if (dataBR) {
+    const [, dia, mes, anoTexto] = dataBR;
+    const anoAtual = hoje.getFullYear();
+    let ano = anoTexto ? Number(anoTexto) : anoAtual;
+
+    if (ano < 100) {
+      ano += 2000;
+    }
+
+    return new Date(ano, Number(mes) - 1, Number(dia));
+  }
+
+  return null;
+}
+
+function montarDataHoraLocal(dataBase, horario) {
+  if (!dataBase || !horario) {
+    return null;
+  }
+
+  const data = new Date(
+    dataBase.getFullYear(),
+    dataBase.getMonth(),
+    dataBase.getDate(),
+    horario.hora,
+    horario.minuto,
+    0,
+    0
+  );
+
+  return Number.isNaN(data.getTime()) ? null : data;
+}
+
+function extrairDataHoraParadaDaMensagem(mensagem) {
+  const texto = (mensagem || "").toString();
+  const gatilho = "(?:desde|parad[ao]\\s*(?:desde|em|a partir de|às|as)?|parou\\s*(?:desde|em|às|as)?|liberad[ao]\\s*(?:em|às|as)?|liberou\\s*(?:em|às|as)?|in[ií]cio\\s*(?:da\\s*parada)?\\s*(?:em|às|as)?|às|as)";
+  const data = "(hoje|ontem|\\d{1,2}\\/\\d{1,2}(?:\\/\\d{2,4})?|\\d{4}-\\d{2}-\\d{2})";
+  const hora = "(\\d{1,2}(?::\\d{2}|h\\d{0,2})?)";
+  const regex = new RegExp(`(?:^|\\s)${gatilho}\\s*(?:${data}\\s*)?(?:às|as)?\\s*${hora}`, "i");
+  const match = texto.match(regex);
+
+  if (!match) {
+    return null;
+  }
+
+  const dataTexto = match[1] || "hoje";
+  const horario = interpretarHorarioTexto(match[2]);
+  const dataBase = interpretarDataParadaTexto(dataTexto);
+  const dataHora = montarDataHoraLocal(dataBase, horario);
+
+  if (!dataHora) {
+    return null;
+  }
+
+  if (!match[1] && dataHora > new Date()) {
+    dataHora.setDate(dataHora.getDate() - 1);
+  }
+
+  return {
+    iso: dataHora.toISOString(),
+    textoEncontrado: match[0].trim()
+  };
+}
+
+function limparTrechoDataParada(texto, trecho) {
+  if (!trecho) {
+    return texto;
+  }
+
+  return (texto || "")
+    .replace(trecho, "")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function abrirModalHorarioAgente({ equipamento, frota, mensagem, acao, respostaChat }) {
+  const modal = document.getElementById("modal-horario-agente");
+  const titulo = document.getElementById("modal-horario-titulo");
+  const descricao = document.getElementById("modal-horario-descricao");
+  const input = document.getElementById("modal-horario-input");
+  const resumo = document.getElementById("modal-horario-resumo");
+  const botao = document.getElementById("modal-horario-confirmar");
+
+  if (!modal || !titulo || !descricao || !input || !resumo || !botao) {
+    return false;
+  }
+
+  const ehLiberacao = acao === "liberar";
+  const nomeSingular = obterNomeSingular(equipamento);
+
+  confirmacaoHorarioAgente = {
+    equipamento,
+    frota,
+    mensagem,
+    acao
+  };
+
+  titulo.innerText = ehLiberacao
+    ? "Horário da liberação"
+    : "Horário da parada";
+
+  descricao.innerText = ehLiberacao
+    ? "Informe a data e hora em que o equipamento voltou a trabalhar."
+    : "Informe a data e hora em que o equipamento parou.";
+
+  resumo.innerText = `${capitalizar(nomeSingular)} ${frota}\nComando: ${mensagem}`;
+  input.value = formatarParaDatetimeLocal(new Date());
+  botao.innerText = ehLiberacao ? "Confirmar liberação" : "Confirmar parada";
+  modal.style.display = "flex";
+  modal.setAttribute("aria-hidden", "false");
+  input.focus();
+
+  if (respostaChat) {
+    respostaChat.innerText = "Informe a data e hora na janela aberta para concluir o comando.";
+  }
+
+  return true;
+}
+
+function fecharModalHorarioAgente() {
+  const modal = document.getElementById("modal-horario-agente");
+
+  if (modal) {
+    modal.style.display = "none";
+    modal.setAttribute("aria-hidden", "true");
+  }
+}
+
+function cancelarHorarioAgente() {
+  const respostaChat = document.getElementById("resposta-chat");
+
+  confirmacaoHorarioAgente = null;
+  fecharModalHorarioAgente();
+
+  if (respostaChat) {
+    respostaChat.innerText = "Comando cancelado. Nenhuma alteração foi gravada.";
+  }
+}
+
+async function confirmarHorarioAgente() {
+  const input = document.getElementById("modal-horario-input");
+  const respostaChat = document.getElementById("resposta-chat");
+
+  if (!confirmacaoHorarioAgente) {
+    fecharModalHorarioAgente();
+    return;
+  }
+
+  const dataISO = obterDataHoraInputComoISO("modal-horario-input");
+
+  if (!input || !input.value || !dataISO) {
+    alert("Informe uma data e hora válida.");
+    return;
+  }
+
+  const horarioTexto = input.value.replace("T", " ");
+  const { equipamento, frota, mensagem, acao } = confirmacaoHorarioAgente;
+  const trechoHorario = acao === "liberar"
+    ? `liberado em ${horarioTexto}`
+    : `parada em ${horarioTexto}`;
+  const mensagemComHorario = `${mensagem} | ${trechoHorario}`;
+
+  confirmacaoHorarioAgente = null;
+  fecharModalHorarioAgente();
+
+  if (acao === "liberar") {
+    await liberarReboquePeloChat(equipamento, frota, mensagemComHorario, respostaChat);
+    return;
+  }
+
+  await pararReboquePeloChat(equipamento, frota, mensagemComHorario, respostaChat);
 }
 
 function anexarDataParadaAoTexto(texto, dataParado) {
@@ -428,7 +641,7 @@ function atualizarCabecalhosDaAba() {
 
   if (mensagemChat) {
     mensagemChat.placeholder = estaNaAbaAgente()
-      ? "Digite uma atualização para qualquer frota. Ex: C2001 parado vazamento, T3001 liberado, 6242 OS 4500..."
+      ? "Ex: C2001 parado desde 07:30 vazamento OS 4550 previsão 14:00, T3001 liberado às 10:00, liberar todos da frente 01..."
       : `Digite uma atualização ou cole uma lista de ${config.plural} pendentes...`;
   }
 
@@ -599,6 +812,42 @@ function obterEquipamentosDaFrente(frente) {
 
   return obterEquipamentosDaAba(equipamentosCarregados, "COLHEDORAS_TRANSBORDOS")
     .filter(equipamento => normalizarTexto(equipamento.conjunto) === frenteNormalizada);
+}
+
+function equipamentoPertenceFrenteTexto(equipamento, frenteTexto) {
+  const conjunto = normalizarTexto(equipamento?.conjunto || "");
+  const frente = normalizarTexto(frenteTexto || "");
+
+  if (!conjunto || !frente) {
+    return false;
+  }
+
+  return conjunto === frente || conjunto.includes(frente) || frente.includes(conjunto);
+}
+
+function obterFrenteAlvoDaMensagem(mensagem) {
+  const frentes = obterFrentesCadastradas();
+  const frenteCadastrada = frentes.find(frente => mensagemContemFrota(mensagem, frente.frota));
+
+  if (frenteCadastrada) {
+    return {
+      nome: frenteCadastrada.frota,
+      cadastrada: true
+    };
+  }
+
+  const match = (mensagem || "").match(/frente\s*(?:de\s*colheita\s*)?[:#-]?\s*([A-Za-z0-9À-ÿ ._-]+)/i);
+
+  if (!match) {
+    return null;
+  }
+
+  const nome = match[1]
+    .replace(/\b(liberar|todos|todas|pendentes|agora|ok)\b/gi, "")
+    .replace(/[.,;]+$/g, "")
+    .trim();
+
+  return nome ? { nome, cadastrada: false } : null;
 }
 
 function obterDescricaoAcaoAtual() {
@@ -1518,24 +1767,40 @@ async function enviarMensagemChat() {
     const descricaoAcao = obterDescricaoAcaoAtual();
 
     if (texto.includes("liberar todos") || texto.includes("liberar todas")) {
-  confirmacaoMassa = {
-    tipo: "liberar_todos"
-  };
+      const frenteAlvo = texto.includes("frente")
+        ? obterFrenteAlvoDaMensagem(mensagem)
+        : null;
 
-  respostaChat.innerHTML = `
-    <div>
-      Atenção: você pediu para liberar TODOS os ${descricaoAcao.plural} pendentes.<br><br>
-      Deseja realmente alterar todos os equipamentos pendentes para OK?
-    </div>
-    <div class="confirmacao-acoes">
-      <button onclick="confirmarAcaoEmMassa('confirmar')">Sim, liberar todos</button>
-      <button class="btn-secondary" onclick="confirmarAcaoEmMassa('cancelar')">Cancelar</button>
-    </div>
-  `;
+      if (texto.includes("frente") && !frenteAlvo) {
+        respostaChat.innerText =
+          "Você pediu para liberar uma frente, mas não consegui identificar qual.\n\n" +
+          "Exemplo: liberar todos da frente 01";
+        return;
+      }
 
-  input.value = "";
-  return;
-}
+      confirmacaoMassa = {
+        tipo: "liberar_todos",
+        frente: frenteAlvo?.nome || ""
+      };
+
+      const alvoTexto = frenteAlvo
+        ? `os equipamentos pendentes da frente ${frenteAlvo.nome}`
+        : `os ${descricaoAcao.plural} pendentes`;
+
+      respostaChat.innerHTML = `
+        <div>
+          Atenção: você pediu para liberar TODOS ${alvoTexto}.<br><br>
+          Deseja realmente alterar esses equipamentos pendentes para OK?
+        </div>
+        <div class="confirmacao-acoes">
+          <button onclick="confirmarAcaoEmMassa('confirmar')">Sim, liberar todos</button>
+          <button class="btn-secondary" onclick="confirmarAcaoEmMassa('cancelar')">Cancelar</button>
+        </div>
+      `;
+
+      input.value = "";
+      return;
+    }
 
 const itensLista = extrairListaPendentes(mensagem);
 const pareceLista = mensagem.includes("🛑") || itensLista.length > 1;
@@ -1558,8 +1823,9 @@ if (pareceLista) {
       respostaChat.innerText =
         "Não consegui identificar uma frota cadastrada nessa mensagem.\n\n" +
         "Exemplos:\n" +
-        "C2001 parado vazamento hidráulico\n" +
-        "T3001 liberado\n" +
+        "C2001 parado desde 07:30 vazamento hidráulico OS 4550 previsão 14:00\n" +
+        "T3001 liberado às 10:00\n" +
+        "liberar todos da frente 01\n" +
         "6242 previsão hoje 16h";
       return;
     }
@@ -1583,12 +1849,13 @@ if (pareceLista) {
 
     const querLiberar = palavrasLiberado.some(p => texto.includes(p));
     const querParar = palavrasPendente.some(p => texto.includes(p));
+    const horarioInformado = extrairDataHoraParadaDaMensagem(mensagem);
 
     const querRemoverPrevisao =
       texto.includes("sem previsão") ||
       texto.includes("sem previsao");
 
-    const matchPrevisaoRapida = mensagem.match(/previs[aã]o\s*(?:para|pra|:|-)?\s*(.*)/i);
+    const matchPrevisaoRapida = mensagem.match(/previs[aã]o\s*(?:para|pra|:|-)?\s*([\s\S]*?)(?=\s+(?:os|o\.s|o\.s\.|ordem)\b|$)/i);
 
     const matchOSRapida = mensagem.match(/(?:alterar\s*)?(?:os|o\.s|o\.s\.|ordem)\s*(?:para|pra|:|-)?\s*(\d+)/i);
 
@@ -1611,8 +1878,9 @@ if (pareceLista) {
       respostaChat.innerText =
         "Não entendi o comando.\n\n" +
         "Exemplos:\n" +
-        "6242 liberado\n" +
-        "6242 parado trocar travessas OS 3000 previsão amanhã 08h\n" +
+        "6242 liberado às 10:00\n" +
+        "6242 parado desde ontem 14h30 trocar travessas OS 3000 previsão amanhã 08h\n" +
+        "liberar todos da frente 01\n" +
         "6242 previsão hoje 16h\n" +
         "6242 sem previsão\n" +
         "6242 OS 4500";
@@ -1620,12 +1888,34 @@ if (pareceLista) {
     }
 
     if (querLiberar) {
+      if (!horarioInformado && abrirModalHorarioAgente({
+        equipamento,
+        frota,
+        mensagem,
+        acao: "liberar",
+        respostaChat
+      })) {
+        input.value = "";
+        return;
+      }
+
       await liberarReboquePeloChat(equipamento, frota, mensagem, respostaChat);
       input.value = "";
       return;
     }
 
     if (querParar) {
+      if (!horarioInformado && abrirModalHorarioAgente({
+        equipamento,
+        frota,
+        mensagem,
+        acao: "parar",
+        respostaChat
+      })) {
+        input.value = "";
+        return;
+      }
+
       await pararReboquePeloChat(equipamento, frota, mensagem, respostaChat);
       input.value = "";
       return;
@@ -1652,7 +1942,7 @@ async function confirmarAlteracao(tipoConfirmacao) {
   }
 
   try {
-    const { frota, motivoNovo, numeroOSNovo, previsaoNova } = confirmacaoPendente;
+    const { frota, motivoNovo, numeroOSNovo, previsaoNova, dataParadoNovo } = confirmacaoPendente;
 
     const { data: equipamento, error: erroBusca } = await supabaseClient
       .from("equipamentos")
@@ -1685,15 +1975,24 @@ async function confirmarAlteracao(tipoConfirmacao) {
 
     const novaOS = numeroOSNovo || equipamento.numero_os || "";
     const novaPrevisao = previsaoNova || equipamento.previsao_saida || "";
+    const observacaoHistorico = dataParadoNovo
+      ? anexarDataParadaAoTexto(novaObservacao, dataParadoNovo)
+      : novaObservacao;
+
+    const dadosUpdate = {
+      observacao: novaObservacao,
+      numero_os: novaOS,
+      previsao_saida: novaPrevisao,
+      updated_at: obterAgoraISO()
+    };
+
+    if (dataParadoNovo) {
+      dadosUpdate.data_parado = dataParadoNovo;
+    }
 
     const { error } = await supabaseClient
       .from("equipamentos")
-      .update({
-        observacao: novaObservacao,
-        numero_os: novaOS,
-        previsao_saida: novaPrevisao,
-        updated_at: obterAgoraISO()
-      })
+      .update(dadosUpdate)
       .eq("frota", frota);
 
     if (error) {
@@ -1710,7 +2009,7 @@ async function confirmarAlteracao(tipoConfirmacao) {
         status_anterior: "PENDENTE",
         status_novo: "PENDENTE",
         observacao_anterior: equipamento.observacao || "",
-        observacao_nova: novaObservacao,
+        observacao_nova: observacaoHistorico,
         numero_os: novaOS,
         previsao_saida: novaPrevisao,
         mensagem_original: `Confirmação: ${tipoConfirmacao} motivo para ${motivoNovo}`
@@ -1720,7 +2019,8 @@ async function confirmarAlteracao(tipoConfirmacao) {
       `Alteração confirmada para ${nomeSingular} ${frota}.\n\n` +
       `Novo motivo: ${novaObservacao}\n` +
       `O.S: ${novaOS || "Não informada"}\n` +
-      `Previsão: ${novaPrevisao || "Sem previsão"}`;
+      `Previsão: ${novaPrevisao || "Sem previsão"}\n` +
+      `Parada: ${dataParadoNovo ? formatarDataHora(dataParadoNovo) : formatarDataHora(equipamento.data_parado)}`;
 
     confirmacaoPendente = null;
 
@@ -2487,7 +2787,8 @@ async function processarAlteracaoRapida({
 
 async function liberarReboquePeloChat(equipamento, frota, mensagem, respostaChat) {
   const nomeSingular = obterNomeSingular(equipamento);
-  const retorno = new Date();
+  const retornoInformado = extrairDataHoraParadaDaMensagem(mensagem);
+  const retorno = retornoInformado ? parseDataHora(retornoInformado.iso) : new Date();
   const resumoLiberacao = obterResumoLiberacao(equipamento, retorno);
 
   if (equipamento.status === "OK") {
@@ -2532,7 +2833,7 @@ async function liberarReboquePeloChat(equipamento, frota, mensagem, respostaChat
     `Status anterior: ${equipamento.status}\n` +
     `Motivo anterior: ${equipamento.observacao || "Sem observação"}\n` +
     `Parada: ${resumoLiberacao.parada ? formatarDataHora(resumoLiberacao.parada) : "Não registrada"}\n` +
-    `Início: ${formatarDataHora(retorno)}\n` +
+    `Início: ${formatarDataHora(retorno)}${retornoInformado ? " (informado no agente)" : ""}\n` +
     `Tempo parado: ${formatarDuracao(resumoLiberacao.tempoMs)}`;
 
   await carregarEquipamentos();
@@ -2543,6 +2844,11 @@ async function liberarReboquePeloChat(equipamento, frota, mensagem, respostaChat
 async function pararReboquePeloChat(equipamento, frota, mensagem, respostaChat) {
   let motivo = mensagem;
   const nomeSingular = obterNomeSingular(equipamento);
+  const paradaInformada = extrairDataHoraParadaDaMensagem(mensagem);
+
+  if (paradaInformada) {
+    motivo = limparTrechoDataParada(motivo, paradaInformada.textoEncontrado);
+  }
 
   motivo = motivo.replace(new RegExp(frota, "g"), "");
   motivo = motivo.replace(/reboque|frente de colheita|frente|colhedora|transbordo|caminh[aã]o pr[oó]prio|caminh[aã]o/gi, "");
@@ -2558,7 +2864,7 @@ async function pararReboquePeloChat(equipamento, frota, mensagem, respostaChat) 
 
   let previsao = "";
 
-  const previsaoMatch = mensagem.match(/previs[aã]o\s*(.*)/i);
+  const previsaoMatch = mensagem.match(/previs[aã]o\s*(?:para|pra|:|-)?\s*([\s\S]*?)(?=\s+(?:os|o\.s|o\.s\.|ordem)\b|$)/i);
   if (previsaoMatch) {
     previsao = previsaoMatch[1].trim();
     motivo = motivo.replace(previsaoMatch[0], "").trim();
@@ -2572,33 +2878,40 @@ async function pararReboquePeloChat(equipamento, frota, mensagem, respostaChat) 
     motivo = "Motivo não informado";
   }
 
+  const dataParado = paradaInformada?.iso || obterAgoraISO();
+
   if (equipamento.status === "PENDENTE") {
     confirmacaoPendente = {
       frota,
       motivoNovo: motivo,
       numeroOSNovo: numeroOS,
-      previsaoNova: previsao
+      previsaoNova: previsao,
+      dataParadoNovo: paradaInformada?.iso || ""
     };
+
+    const paradaTexto = paradaInformada
+      ? `<br>Nova parada informada: ${formatarDataHora(paradaInformada.iso)}`
+      : "";
 
     respostaChat.innerHTML = `
       <div>
         Atenção: ${nomeSingular} ${frota} já está PENDENTE.<br><br>
         Motivo atual: ${equipamento.observacao || "Sem observação"}<br>
         O.S atual: ${equipamento.numero_os || "Não informada"}<br>
+        Parada atual: ${equipamento.data_parado ? formatarDataHora(equipamento.data_parado) : "Não registrada"}<br>
         Previsão atual: ${equipamento.previsao_saida || "Sem previsão"}<br><br>
-        Novo motivo informado: ${motivo}<br><br>
+        Novo motivo informado: ${motivo}${paradaTexto}<br><br>
         O problema antigo já foi solucionado?
       </div>
-      <br>
-      <button onclick="confirmarAlteracao('substituir')">Substituir motivo</button>
-      <button onclick="confirmarAlteracao('adicionar')">Adicionar novo problema</button>
-      <button onclick="confirmarAlteracao('cancelar')">Cancelar</button>
+      <div class="confirmacao-acoes">
+        <button onclick="confirmarAlteracao('substituir')">Substituir motivo</button>
+        <button class="btn-secondary" onclick="confirmarAlteracao('adicionar')">Adicionar novo problema</button>
+        <button class="btn-secondary" onclick="confirmarAlteracao('cancelar')">Cancelar</button>
+      </div>
     `;
 
     return;
   }
-
-  const dataParado = obterAgoraISO();
 
   const { error } = await supabaseClient
     .from("equipamentos")
@@ -2626,7 +2939,7 @@ async function pararReboquePeloChat(equipamento, frota, mensagem, respostaChat) 
       status_anterior: equipamento.status || "",
       status_novo: "PENDENTE",
       observacao_anterior: equipamento.observacao || "",
-      observacao_nova: `${motivo} | Parada: ${formatarDataHora(dataParado)}`,
+      observacao_nova: anexarDataParadaAoTexto(motivo, dataParado),
       numero_os: numeroOS,
       previsao_saida: previsao,
       mensagem_original: mensagem
@@ -2635,7 +2948,7 @@ async function pararReboquePeloChat(equipamento, frota, mensagem, respostaChat) 
   respostaChat.innerText =
     `${capitalizar(nomeSingular)} ${frota} atualizado como PENDENTE.\n\n` +
     `Motivo: ${motivo}\n` +
-    `Parada: ${formatarDataHora(dataParado)}\n` +
+    `Parada: ${formatarDataHora(dataParado)}${paradaInformada ? " (informada no agente)" : ""}\n` +
     `O.S: ${numeroOS || "Não informada"}\n` +
     `Previsão: ${previsao || "Sem previsão"}`;
 
@@ -2698,9 +3011,14 @@ function extrairListaPendentes(mensagem) {
     const bloco = match[2].trim();
 
     const osMatch = bloco.match(/(?:📋)?\s*(?:OS|O\.S|O\.S\.)\s*[:\-]?\s*(\d+)/i);
-    const previsaoMatch = bloco.match(/(?:⏰)?\s*previs[aã]o\s*[:\-]?\s*([^\n🛑]+)/i);
+    const previsaoMatch = bloco.match(/(?:⏰)?\s*previs[aã]o\s*(?:para|pra|:|-)?\s*([^\n🛑]*?)(?=\s+(?:OS|O\.S|O\.S\.|ordem)\b|\n|🛑|$)/i);
+    const paradaInformada = extrairDataHoraParadaDaMensagem(bloco);
 
     let motivo = bloco;
+
+    if (paradaInformada) {
+      motivo = limparTrechoDataParada(motivo, paradaInformada.textoEncontrado);
+    }
 
     if (osMatch) {
       motivo = motivo.replace(osMatch[0], "");
@@ -2720,7 +3038,8 @@ function extrairListaPendentes(mensagem) {
       frota,
       motivo: motivo || "Motivo não informado",
       numero_os: osMatch ? osMatch[1] : "",
-      previsao_saida: previsaoMatch ? previsaoMatch[1].trim() : ""
+      previsao_saida: previsaoMatch ? previsaoMatch[1].trim() : "",
+      data_parado: paradaInformada?.iso || ""
     });
   }
 
@@ -2743,6 +3062,8 @@ async function processarListaDePendentes(mensagem, respostaChat) {
 
  for (let i = 0; i < itens.length; i++) {
   const item = itens[i];
+    const dataParadoItem = item.data_parado || obterAgoraISO();
+
     try {
       const { data: equipamentoExistente, error: erroBusca } = await supabaseClient
         .from("equipamentos")
@@ -2785,7 +3106,7 @@ async function processarListaDePendentes(mensagem, respostaChat) {
             status: "PENDENTE",
             observacao: item.motivo,
             numero_os: item.numero_os,
-            data_parado: obterAgoraISO(),
+            data_parado: dataParadoItem,
             previsao_saida: item.previsao_saida,
             ativo: true
           });
@@ -2803,7 +3124,7 @@ async function processarListaDePendentes(mensagem, respostaChat) {
             status_anterior: "",
             status_novo: "PENDENTE",
             observacao_anterior: "",
-            observacao_nova: item.motivo,
+            observacao_nova: anexarDataParadaAoTexto(item.motivo, dataParadoItem),
             numero_os: item.numero_os,
             previsao_saida: item.previsao_saida,
             mensagem_original: "Importado por lista de pendentes"
@@ -2820,7 +3141,7 @@ async function processarListaDePendentes(mensagem, respostaChat) {
           observacao: item.motivo,
           numero_os: item.numero_os,
           previsao_saida: item.previsao_saida,
-          data_parado: equipamentoExistente.data_parado || obterAgoraISO(),
+          data_parado: item.data_parado || equipamentoExistente.data_parado || obterAgoraISO(),
           ativo: true,
           updated_at: obterAgoraISO()
         })
@@ -2839,7 +3160,10 @@ async function processarListaDePendentes(mensagem, respostaChat) {
           status_anterior: equipamentoExistente.status || "",
           status_novo: "PENDENTE",
           observacao_anterior: equipamentoExistente.observacao || "",
-          observacao_nova: item.motivo,
+          observacao_nova: anexarDataParadaAoTexto(
+            item.motivo,
+            item.data_parado || equipamentoExistente.data_parado || obterAgoraISO()
+          ),
           numero_os: item.numero_os,
           previsao_saida: item.previsao_saida,
           mensagem_original: "Atualizado por lista de pendentes"
@@ -2897,10 +3221,21 @@ async function confirmarAcaoEmMassa(acao) {
         return;
       }
 
-      const pendentesDaAba = obterEquipamentosParaAcaoNaAba(pendentes || []);
+      let pendentesDaAba = obterEquipamentosParaAcaoNaAba(pendentes || []);
+      const frenteAlvo = confirmacaoMassa.frente || "";
+
+      if (frenteAlvo) {
+        pendentesDaAba = pendentesDaAba.filter(equipamento =>
+          equipamentoPertenceFrenteTexto(equipamento, frenteAlvo)
+        );
+      }
+
+      const alvoMensagem = frenteAlvo
+        ? ` da frente ${frenteAlvo}`
+        : " nesta aba";
 
       if (!pendentesDaAba || pendentesDaAba.length === 0) {
-        respostaChat.innerText = `Nenhum ${descricaoAcao.singular} pendente para liberar nesta aba.`;
+        respostaChat.innerText = `Nenhum ${descricaoAcao.singular} pendente para liberar${alvoMensagem}.`;
         confirmacaoMassa = null;
         return;
       }
@@ -2935,14 +3270,16 @@ async function confirmarAcaoEmMassa(acao) {
         observacao_nova: obterResumoLiberacao(e, retorno).texto,
         numero_os: e.numero_os || "",
         previsao_saida: "",
-        mensagem_original: "Comando: liberar todos"
+        mensagem_original: frenteAlvo
+          ? `Comando: liberar todos da frente ${frenteAlvo}`
+          : "Comando: liberar todos"
       }));
 
       await supabaseClient
         .from("historico_movimentacoes")
         .insert(historicos);
 
-      respostaChat.innerText = `${pendentesDaAba.length} ${descricaoAcao.plural} foram liberados com sucesso.`;
+      respostaChat.innerText = `${pendentesDaAba.length} ${descricaoAcao.plural} foram liberados com sucesso${frenteAlvo ? ` na frente ${frenteAlvo}` : ""}.`;
 
       confirmacaoMassa = null;
 
