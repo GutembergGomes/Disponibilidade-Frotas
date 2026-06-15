@@ -1,0 +1,371 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Controle de Equipamentos</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+  <div class="container">
+    <header class="app-header">
+      <div class="app-title">
+        <div class="brand-mark">CE</div>
+        <div>
+          <span class="eyebrow">Painel operacional</span>
+          <h1>Controle de Equipamentos</h1>
+          <p>Gestão de reboques, frentes de colheita, caminhões, pendências e disponibilidade diária.</p>
+        </div>
+      </div>
+
+      <div class="tema-box">
+        <button class="btn-secondary" onclick="alternarTema()">Tema Claro/Escuro</button>
+      </div>
+    </header>
+
+<div class="abas-equipamentos" role="tablist" aria-label="Categorias de equipamentos">
+  <button class="aba-equipamento ativa" data-aba="REBOQUES" onclick="alterarAba('REBOQUES')" role="tab" aria-selected="true">
+    Reboques
+  </button>
+  <button class="aba-equipamento" data-aba="FRENTES" onclick="alterarAba('FRENTES')" role="tab" aria-selected="false">
+    Frentes de Colheita
+  </button>
+  <button class="aba-equipamento" data-aba="CAMINHOES_PROPRIOS" onclick="alterarAba('CAMINHOES_PROPRIOS')" role="tab" aria-selected="false">
+    Caminhões Próprios
+  </button>
+  <button class="aba-equipamento" data-aba="DISPONIBILIDADE" onclick="alterarAba('DISPONIBILIDADE')" role="tab" aria-selected="false">
+    Disponibilidade
+  </button>
+  <button class="aba-equipamento" data-aba="AGENTE" onclick="alterarAba('AGENTE')" role="tab" aria-selected="false">
+    Agente
+  </button>
+</div>
+
+<p id="resumo-aba" class="resumo-aba">
+  Acompanhando reboques cadastrados.
+</p>
+
+<div class="filtro-box">
+  <label for="filtro-status">Mostrar:</label>
+
+  <select id="filtro-status" onchange="alterarFiltroStatus()">
+    <option value="TODOS">Todos</option>
+    <option value="PENDENTE">Somente Pendentes</option>
+    <option value="OK">Somente OK</option>
+  </select>
+</div>
+
+<p id="texto-filtro" class="texto-filtro">
+  Mostrando todos os equipamentos ativos.
+</p>
+
+<div class="painel-superior"></div>
+
+    <div class="cards">
+      <div class="card">
+        <h3>Total</h3>
+        <p id="total">0</p>
+      </div>
+
+      <div class="card ok">
+        <h3>OK</h3>
+        <p id="ok">0</p>
+      </div>
+
+      <div class="card pendente">
+        <h3>Pendentes</h3>
+        <p id="pendentes">0</p>
+      </div>
+    </div>
+
+<div class="grafico-box">
+  <h2 id="titulo-grafico">Gráfico de Situação dos Reboques</h2>
+  <canvas id="graficoStatus"></canvas>
+
+  <div class="percentuais-box">
+    <p id="percentual-ok">OK: 0 reboques - 0%</p>
+    <p id="percentual-pendente">Pendentes: 0 reboques - 0%</p>
+  </div>
+</div>
+
+<div class="disponibilidade-box" style="display: none;">
+  <div class="disponibilidade-header">
+    <h2>Disponibilidade do Dia</h2>
+
+    <div class="disponibilidade-controles">
+      <input type="date" id="data-disponibilidade" onchange="atualizarDisponibilidadeDia()">
+      <button onclick="atualizarDisponibilidadeDia()">Atualizar</button>
+    </div>
+  </div>
+
+  <div class="cards disponibilidade-cards">
+    <div class="card">
+      <h3>Equipamentos</h3>
+      <p id="disp-equipamentos">0</p>
+    </div>
+
+    <div class="card pendente">
+      <h3>Tempo Parado</h3>
+      <p id="disp-tempo-parado">0min</p>
+    </div>
+
+    <div class="card ok">
+      <h3>Disponibilidade</h3>
+      <p id="disp-percentual">0%</p>
+    </div>
+  </div>
+
+  <p id="texto-disponibilidade" class="texto-filtro">
+    Selecione uma data para calcular a disponibilidade.
+  </p>
+
+  <div class="disponibilidade-graficos">
+    <div class="disponibilidade-grafico-card">
+      <h3>Disponibilidade Geral</h3>
+      <div class="grafico-pizza-wrap">
+        <canvas id="grafico-disponibilidade-geral"></canvas>
+      </div>
+      <p id="legenda-disponibilidade-geral" class="grafico-legenda">Aguardando cálculo.</p>
+    </div>
+
+    <div class="disponibilidade-grafico-card">
+      <h3>Situação Atual</h3>
+      <div class="grafico-pizza-wrap">
+        <canvas id="grafico-disponibilidade-status"></canvas>
+      </div>
+      <p id="legenda-disponibilidade-status" class="grafico-legenda">Aguardando cálculo.</p>
+    </div>
+
+    <div class="disponibilidade-grafico-card">
+      <h3>Tempo Parado por Tipo</h3>
+      <div class="grafico-pizza-wrap">
+        <canvas id="grafico-disponibilidade-tipos"></canvas>
+      </div>
+      <p id="legenda-disponibilidade-tipos" class="grafico-legenda">Aguardando cálculo.</p>
+    </div>
+  </div>
+
+  <div id="disponibilidade-frentes" class="disponibilidade-frentes" style="display: none;"></div>
+
+  <h3 class="disponibilidade-secao-titulo">Resumo geral dos equipamentos</h3>
+
+  <div class="tabela-scroll">
+    <table>
+      <thead>
+        <tr>
+          <th>Frota</th>
+          <th>Tipo</th>
+          <th>Frente/Conjunto</th>
+          <th>Paradas</th>
+          <th>Tempo Parado</th>
+          <th>Disponibilidade</th>
+        </tr>
+      </thead>
+      <tbody id="tabela-disponibilidade"></tbody>
+    </table>
+  </div>
+</div>
+
+    <div class="acoes">
+      <button onclick="carregarEquipamentos()">Atualizar Lista</button>
+    </div>
+
+   
+
+<button id="btn-toggle-cadastro" onclick="toggleCadastro()">
+  + Cadastrar Equipamento
+</button>
+
+<div class="cadastro-box" id="cadastro-box" style="display: none;">
+  <h2>Cadastrar Equipamento</h2>
+
+  <div class="form-grid">
+    <input type="text" id="cad-frota" placeholder="Frota">
+    <select id="cad-tipo" aria-label="Tipo de equipamento">
+      <option value="Reboque">Reboque</option>
+      <option value="Frente de Colheita">Frente de Colheita</option>
+      <option value="Colhedora">Colhedora</option>
+      <option value="Transbordo">Transbordo</option>
+      <option value="Caminhão Próprio">Caminhão Próprio</option>
+    </select>
+    <input type="text" id="cad-placa" placeholder="Placa">
+    <input type="text" id="cad-conjunto" placeholder="Conjunto. Ex: 6242-6190">
+
+    <select id="cad-tipo-conjunto">
+      <option value="INDIVIDUAL">Individual</option>
+      <option value="CONJUNTO">Conjunto</option>
+    </select>
+
+    <select id="cad-status">
+      <option value="OK">OK</option>
+      <option value="PENDENTE">Pendente</option>
+    </select>
+
+    <label class="campo-formulario">
+      <span>Data/hora da parada</span>
+      <input type="datetime-local" id="cad-data-parado">
+    </label>
+
+    <input type="text" id="cad-observacao" placeholder="Observação / Problema">
+<input type="text" id="cad-os" placeholder="Número da O.S">
+<input type="text" id="cad-previsao" placeholder="Previsão de saída">
+  </div>
+
+ <div class="botoes-formulario">
+  <button id="btn-cadastrar" onclick="cadastrarEquipamento()">Cadastrar Equipamento</button>
+  <button id="btn-salvar-edicao" onclick="salvarEdicaoEquipamento()" style="display: none;">Salvar Alterações</button>
+  <button id="btn-cancelar-edicao" onclick="cancelarEdicao()" style="display: none;">Cancelar Edição</button>
+</div>
+</div>
+
+<div id="frentes-box" class="frentes-box" style="display: none;">
+  <div class="frentes-formularios">
+    <div class="frente-painel">
+      <h2>Cadastrar Frente</h2>
+
+      <div class="form-grid">
+        <input type="text" id="frente-codigo" placeholder="Frente. Ex: Frente 01">
+
+        <select id="frente-status">
+          <option value="OK">OK</option>
+          <option value="PENDENTE">Pendente</option>
+        </select>
+
+        <input type="text" id="frente-observacao" placeholder="Observação">
+      </div>
+
+      <button onclick="cadastrarFrente()">Cadastrar Frente</button>
+    </div>
+
+    <div class="frente-painel">
+      <h2>Adicionar na Frente</h2>
+
+      <div class="form-grid">
+        <select id="vinculo-frente">
+          <option value="">Selecione a frente</option>
+        </select>
+
+        <select id="vinculo-tipo">
+          <option value="Colhedora">Colhedora</option>
+          <option value="Transbordo">Transbordo</option>
+        </select>
+
+        <input type="text" id="vinculo-frota" placeholder="Frota">
+        <input type="text" id="vinculo-placa" placeholder="Placa">
+
+        <select id="vinculo-status">
+          <option value="OK">OK</option>
+          <option value="PENDENTE">Pendente</option>
+        </select>
+
+        <label class="campo-formulario">
+          <span>Data/hora da parada</span>
+          <input type="datetime-local" id="vinculo-data-parado">
+        </label>
+
+        <input type="text" id="vinculo-observacao" placeholder="Observação / Problema">
+      </div>
+
+      <button onclick="cadastrarEquipamentoNaFrente()">Adicionar Equipamento</button>
+    </div>
+  </div>
+
+  <h2>Frentes Cadastradas</h2>
+  <div id="lista-frentes" class="lista-frentes"></div>
+</div>
+
+    <h2 id="titulo-tabela">Reboques</h2>
+
+    <div id="tabela-equipamentos-box" class="tabela-scroll">
+    <table>
+      <thead>
+        <tr>
+          <th>Frota</th>
+          <th>Tipo</th>
+          <th>Placa</th>
+          <th>Status</th>
+          <th>Observação</th>
+          <th>O.S</th>
+          <th>Data Parado</th>
+          <th>Previsão</th>
+          <th>Ações</th>
+        </tr>
+      </thead>
+      <tbody id="tabela-equipamentos"></tbody>
+    </table>
+    </div>
+
+     <div class="chat-box">
+  <h2>Agente Global de Atualização</h2>
+
+  <div class="chat-input">
+    <textarea
+  id="mensagem-chat"
+  placeholder="Digite uma atualização ou cole uma lista de equipamentos pendentes..."
+  rows="4"
+></textarea>
+    <button onclick="enviarMensagemChat()">Enviar</button>
+  </div>
+
+  <div id="resposta-chat" class="resposta-chat">
+    Digite uma atualização para qualquer frota cadastrada no sistema.
+
+    <div id="progresso-box" class="progresso-box" style="display: none;">
+  <div class="progresso-info">
+    <span id="progresso-texto">Processando...</span>
+    <span id="progresso-percentual">0%</span>
+  </div>
+
+  <div class="progresso-linha">
+    <div id="progresso-barra" class="progresso-barra"></div>
+  </div>
+</div>
+  </div>
+</div>
+
+    <div class="relatorio-header">
+  <h2 id="titulo-relatorio">Relatório de Reboques para WhatsApp</h2>
+
+  <div class="relatorio-botoes">
+    <button onclick="gerarRelatorio()">Gerar Relatório</button>
+    <button onclick="copiarRelatorio()">Copiar Relatório</button>
+  </div>
+</div>
+
+<div id="mensagem-relatorio" class="mensagem-relatorio"></div>
+
+<textarea id="relatorio" readonly placeholder="O relatório será gerado aqui..."></textarea>
+
+    <h2 id="historico-titulo">Histórico de Movimentações</h2>
+
+<button id="btn-atualizar-historico" onclick="carregarHistorico()">Atualizar Histórico</button>
+
+<div id="historico-box" class="tabela-scroll">
+<table>
+  <thead>
+    <tr>
+      <th>Data/Hora</th>
+      <th>Frota</th>
+      <th>Ação</th>
+      <th>Status Anterior</th>
+      <th>Status Novo</th>
+      <th>Observação Anterior</th>
+      <th>Observação Nova</th>
+      <th>O.S</th>
+      <th>Previsão</th>
+    </tr>
+  </thead>
+  <tbody id="tabela-historico"></tbody>
+</table>
+</div>
+
+    
+  </div>
+
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+<script src="supabase-config.js"></script>
+<script src="script.js"></script>
+</body>
+</html>
