@@ -491,6 +491,13 @@ td.status-pendente {
   font-weight: 900;
 }
 
+.status-emprestimo,
+td.status-emprestimo {
+  background: var(--warning-soft);
+  color: var(--warning);
+  font-weight: 900;
+}
+
 .form-grid {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
