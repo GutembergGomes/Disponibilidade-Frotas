@@ -5,6 +5,7 @@ let graficoStatus = null;
 let graficoDisponibilidadeGeral = null;
 let graficoDisponibilidadeStatus = null;
 let graficoDisponibilidadeTipos = null;
+let graficosDisponibilidadeCategorias = [];
 let graficosDisponibilidadeFrentes = [];
 let confirmacaoMassa = null;
 let confirmacaoHorarioAgente = null;
@@ -1080,6 +1081,7 @@ function atualizarDisponibilidadeDia() {
   }
 
   atualizarGraficosDisponibilidade(resultados);
+  renderizarDisponibilidadePorCategoria(dataISO);
   renderizarDisponibilidadePorFrente(dataISO);
 
   if (resultados.length === 0) {
@@ -1129,6 +1131,11 @@ function destruirGraficoDisponibilidade(grafico) {
   if (grafico && typeof grafico.destroy === "function") {
     grafico.destroy();
   }
+}
+
+function destruirGraficosDisponibilidadeCategorias() {
+  graficosDisponibilidadeCategorias.forEach(grafico => destruirGraficoDisponibilidade(grafico));
+  graficosDisponibilidadeCategorias = [];
 }
 
 function destruirGraficosDisponibilidadeFrentes() {
@@ -1374,6 +1381,78 @@ function renderizarDisponibilidadeTipo(titulo, resultados, chartId) {
       </div>
     </div>
   `;
+}
+
+function renderizarDisponibilidadePorCategoria(dataISO) {
+  const container = document.getElementById("disponibilidade-categorias");
+
+  if (!container) {
+    return;
+  }
+
+  destruirGraficosDisponibilidadeCategorias();
+
+  if (!estaNaAbaDisponibilidade()) {
+    container.style.display = "none";
+    container.innerHTML = "";
+    return;
+  }
+
+  const categorias = [
+    {
+      titulo: "Reboques",
+      aba: "REBOQUES",
+      chartId: "grafico-disponibilidade-reboques"
+    },
+    {
+      titulo: "Caminhões Próprios",
+      aba: "CAMINHOES_PROPRIOS",
+      chartId: "grafico-disponibilidade-caminhoes"
+    }
+  ];
+
+  const cards = categorias.map(categoria => {
+    const equipamentos = obterEquipamentosDaAba(equipamentosCarregados, categoria.aba);
+    const resultados = calcularDisponibilidadeEquipamentos(equipamentos, dataISO);
+
+    return renderizarDisponibilidadeTipo(categoria.titulo, resultados, categoria.chartId);
+  }).join("");
+
+  container.style.display = "grid";
+  container.innerHTML = `
+    <h3 class="disponibilidade-secao-titulo">Disponibilidade de Reboques e Caminhões</h3>
+    <div class="disponibilidade-tipos">
+      ${cards}
+    </div>
+  `;
+
+  categorias.forEach(categoria => {
+    const equipamentos = obterEquipamentosDaAba(equipamentosCarregados, categoria.aba);
+    const resultados = calcularDisponibilidadeEquipamentos(equipamentos, dataISO);
+    const grafico = criarGraficoPizza(
+      categoria.chartId,
+      ["Tempo disponível", "Tempo parado"],
+      [
+        resultados.reduce((total, item) => total + Math.max(0, item.calculo.tempoBaseMs - item.calculo.tempoParadoMs), 0),
+        resultados.reduce((total, item) => total + item.calculo.tempoParadoMs, 0)
+      ],
+      ["#22c55e", "#ef4444"],
+      { formatarValor: formatarDuracao }
+    );
+
+    const resumo = calcularResumoDisponibilidade(resultados);
+
+    atualizarLegendaGrafico(
+      `${categoria.chartId}-legenda`,
+      resumo.equipamentos > 0
+        ? `${resumo.disponibilidade.toFixed(1)}% disponível | ${formatarDuracao(resumo.tempoParadoTotal)} parado`
+        : "Sem equipamentos cadastrados"
+    );
+
+    if (grafico) {
+      graficosDisponibilidadeCategorias.push(grafico);
+    }
+  });
 }
 
 function renderizarDisponibilidadePorFrente(dataISO) {
@@ -1888,7 +1967,7 @@ if (pareceLista) {
     }
 
     if (querLiberar) {
-      if (!horarioInformado && abrirModalHorarioAgente({
+      if (!ehStatusOk(equipamento.status) && !horarioInformado && abrirModalHorarioAgente({
         equipamento,
         frota,
         mensagem,
