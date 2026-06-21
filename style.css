@@ -898,6 +898,59 @@ td.status-emprestimo {
   flex-wrap: wrap;
 }
 
+.modal-historico-card {
+  width: min(720px, 100%);
+}
+
+.modal-registros-card {
+  width: min(960px, 100%);
+}
+
+.modal-registros-tabela {
+  max-height: min(62vh, 560px);
+}
+
+.modal-historico-grid {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.modal-historico-observacao {
+  grid-column: 1 / -1;
+}
+
+.modal-historico-observacao textarea {
+  width: 100%;
+  resize: vertical;
+}
+
+.historico-acoes {
+  min-width: 150px;
+}
+
+.historico-acoes-wrap {
+  display: flex;
+  justify-content: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.frota-link {
+  min-height: auto;
+  padding: 0;
+  background: transparent;
+  color: var(--primary);
+  border: 0;
+  box-shadow: none;
+  font-weight: 950;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+
+.frota-link:hover {
+  background: transparent;
+  color: var(--primary-hover);
+}
+
 .relatorio-header {
   margin-top: 26px;
 }
@@ -1104,6 +1157,10 @@ body.dark-mode th {
 
   .modal-fechar {
     width: 36px;
+  }
+
+  .frota-link {
+    width: auto;
   }
 
   .equipamento-frente {
