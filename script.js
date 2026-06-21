@@ -519,6 +519,22 @@ function tipoPertenceAba(tipo, aba) {
   return config.tipos.some(tipoAba => normalizarTexto(tipoAba) === tipoNormalizado);
 }
 
+function obterAbaDoTipo(tipo) {
+  if (tipoPertenceAba(tipo, "FRENTES")) {
+    return "FRENTES";
+  }
+
+  if (tipoPertenceAba(tipo, "COLHEDORAS_TRANSBORDOS")) {
+    return "COLHEDORAS_TRANSBORDOS";
+  }
+
+  if (tipoPertenceAba(tipo, "CAMINHOES_PROPRIOS")) {
+    return "CAMINHOES_PROPRIOS";
+  }
+
+  return "REBOQUES";
+}
+
 function obterAbaDoEquipamento(equipamento) {
   const tipo = equipamento ? equipamento.tipo : "";
 
@@ -667,7 +683,7 @@ function atualizarOpcoesStatusCadastro(valorPreferido = "") {
   }
 
   const tipoSelecionado = selectTipo?.value || obterConfiguracaoAba().tipoPadrao;
-  const mostrarEmprestimo = abaAtual === "CAMINHOES_PROPRIOS" || obterAbaDoTipo(tipoSelecionado) === "CAMINHOES_PROPRIOS";
+  const mostrarEmprestimo = abaAtual === "CAMINHOES_PROPRIOS" || tipoPertenceAba(tipoSelecionado, "CAMINHOES_PROPRIOS");
   const valorAtual = valorPreferido || selectStatus.value || "OK";
   const opcoes = mostrarEmprestimo
     ? [
@@ -889,6 +905,38 @@ function atualizarVisibilidadeFrentes() {
 
 function obterFrentesCadastradas() {
   return obterEquipamentosDaAba(equipamentosCarregados, "FRENTES");
+}
+
+function obterFrentesParaRenderizacao() {
+  const frentesPorNome = new Map();
+
+  obterFrentesCadastradas().forEach(frente => {
+    const chave = normalizarTexto(frente.frota);
+
+    if (chave) {
+      frentesPorNome.set(chave, frente);
+    }
+  });
+
+  obterEquipamentosDaAba(equipamentosCarregados, "COLHEDORAS_TRANSBORDOS")
+    .filter(equipamento => equipamento.conjunto && equipamento.conjunto.trim() !== "")
+    .forEach(equipamento => {
+      const nomeFrente = equipamento.conjunto.trim();
+      const chave = normalizarTexto(nomeFrente);
+
+      if (!frentesPorNome.has(chave)) {
+        frentesPorNome.set(chave, {
+          frota: nomeFrente,
+          tipo: "Frente de Colheita",
+          status: "OK",
+          observacao: "Frente identificada pelos equipamentos vinculados",
+          virtual: true
+        });
+      }
+    });
+
+  return Array.from(frentesPorNome.values())
+    .sort((a, b) => (a.frota || "").localeCompare(b.frota || "", "pt-BR", { numeric: true }));
 }
 
 function obterEquipamentosDaFrente(frente) {
@@ -1851,7 +1899,7 @@ function renderizarFrentesDeColheita() {
     return;
   }
 
-  const frentes = filtrarFrentesPorStatus(obterFrentesCadastradas());
+  const frentes = filtrarFrentesPorStatus(obterFrentesParaRenderizacao());
 
   if (frentes.length === 0) {
     lista.innerHTML = `
