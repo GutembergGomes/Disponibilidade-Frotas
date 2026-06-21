@@ -350,6 +350,81 @@
   </div>
 </div>
 
+<div id="modal-registros-frota" class="modal-horario-agente" aria-hidden="true" style="display: none;">
+  <div class="modal-horario-card modal-registros-card" role="dialog" aria-modal="true" aria-labelledby="modal-registros-titulo">
+    <div class="modal-horario-header">
+      <div>
+        <h2 id="modal-registros-titulo">Registros da frota</h2>
+        <p id="modal-registros-descricao">Paradas, liberações e empréstimos registrados.</p>
+      </div>
+      <button class="modal-fechar" type="button" onclick="fecharRegistrosFrota()" aria-label="Fechar">×</button>
+    </div>
+
+    <div class="tabela-scroll modal-registros-tabela">
+      <table>
+        <thead>
+          <tr>
+            <th>Data/Hora</th>
+            <th>Ação</th>
+            <th>Status</th>
+            <th>Observação</th>
+            <th>O.S</th>
+            <th>Previsão</th>
+            <th>Ações</th>
+          </tr>
+        </thead>
+        <tbody id="modal-registros-lista"></tbody>
+      </table>
+    </div>
+  </div>
+</div>
+
+<div id="modal-historico-lancamento" class="modal-horario-agente" aria-hidden="true" style="display: none;">
+  <div class="modal-horario-card modal-historico-card" role="dialog" aria-modal="true" aria-labelledby="modal-historico-titulo">
+    <div class="modal-horario-header">
+      <div>
+        <h2 id="modal-historico-titulo">Editar lançamento</h2>
+        <p>Altere o horário, status e observação deste lançamento.</p>
+      </div>
+      <button class="modal-fechar" type="button" onclick="cancelarEdicaoHistorico()" aria-label="Fechar">×</button>
+    </div>
+
+    <div class="form-grid modal-historico-grid">
+      <label class="campo-formulario">
+        <span>Frota</span>
+        <input type="text" id="hist-frota" readonly>
+      </label>
+
+      <label class="campo-formulario">
+        <span>Data/hora do lançamento</span>
+        <input type="datetime-local" id="hist-data">
+      </label>
+
+      <label class="campo-formulario">
+        <span>Status novo</span>
+        <select id="hist-status-novo">
+          <option value="OK">Disponível / OK</option>
+          <option value="PENDENTE">Parado / Pendente</option>
+          <option value="EMPRESTIMO">Empréstimo</option>
+        </select>
+      </label>
+
+      <label class="campo-formulario modal-historico-observacao">
+        <span>Observação / motivo</span>
+        <textarea id="hist-observacao-nova" rows="4"></textarea>
+      </label>
+
+      <input type="text" id="hist-os" placeholder="Número da O.S">
+      <input type="text" id="hist-previsao" placeholder="Previsão">
+    </div>
+
+    <div class="modal-horario-acoes">
+      <button type="button" onclick="salvarEdicaoHistorico()">Salvar lançamento</button>
+      <button class="btn-secondary" type="button" onclick="cancelarEdicaoHistorico()">Cancelar</button>
+    </div>
+  </div>
+</div>
+
     <div class="relatorio-header">
   <h2 id="titulo-relatorio">Relatório de Reboques para WhatsApp</h2>
 
@@ -380,6 +455,7 @@
       <th>Observação Nova</th>
       <th>O.S</th>
       <th>Previsão</th>
+      <th>Ações</th>
     </tr>
   </thead>
   <tbody id="tabela-historico"></tbody>
