@@ -106,7 +106,7 @@
     </div>
 
     <div class="card pendente">
-      <h3>Tempo Parado</h3>
+      <h3>Tempo Indisponível</h3>
       <p id="disp-tempo-parado">0min</p>
     </div>
 
@@ -138,7 +138,7 @@
     </div>
 
     <div class="disponibilidade-grafico-card">
-      <h3>Tempo Parado por Tipo</h3>
+      <h3>Tempo Indisponível por Tipo</h3>
       <div class="grafico-pizza-wrap">
         <canvas id="grafico-disponibilidade-tipos"></canvas>
       </div>
@@ -184,7 +184,7 @@
 
   <div class="form-grid">
     <input type="text" id="cad-frota" placeholder="Frota">
-    <select id="cad-tipo" aria-label="Tipo de equipamento">
+    <select id="cad-tipo" aria-label="Tipo de equipamento" onchange="atualizarOpcoesStatusCadastro()">
       <option value="Reboque">Reboque</option>
       <option value="Frente de Colheita">Frente de Colheita</option>
       <option value="Colhedora">Colhedora</option>
