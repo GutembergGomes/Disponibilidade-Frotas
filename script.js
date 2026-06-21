@@ -9,6 +9,7 @@ let graficosDisponibilidadeCategorias = [];
 let graficosDisponibilidadeFrentes = [];
 let confirmacaoMassa = null;
 let confirmacaoHorarioAgente = null;
+let historicoEmEdicao = null;
 
 let equipamentosCarregados = [];
 let historicoCarregado = [];
@@ -451,6 +452,33 @@ function extrairDataParadaDoHistorico(item) {
   }
 
   return parseDataHora(match[1].trim());
+}
+
+function extrairDataInicioDoHistorico(item) {
+  const texto = `${item.observacao_nova || ""} ${item.mensagem_original || ""}`;
+  const match = texto.match(/(?:in[ií]cio|liberado em|liberou em)\s*:?\s*([^|]+)/i);
+
+  if (!match) {
+    return null;
+  }
+
+  return parseDataHora(match[1].trim());
+}
+
+function obterDataReferenciaHistorico(item) {
+  if (!item) {
+    return null;
+  }
+
+  if (ehStatusOk(item.status_novo)) {
+    return extrairDataInicioDoHistorico(item) || parseDataHora(item.created_at);
+  }
+
+  if (ehStatusIndisponivel(item.status_novo)) {
+    return extrairDataParadaDoHistorico(item) || parseDataHora(item.created_at);
+  }
+
+  return parseDataHora(item.created_at);
 }
 
 function formatarDuracao(ms) {
@@ -1008,13 +1036,10 @@ function obterEventosHistoricoDoEquipamento(frota, equipamento) {
     .filter(item => item.frota === frota && item.created_at)
     .map(item => {
       const statusNovo = item.status_novo || "";
-      const dataHistorico = parseDataHora(item.created_at);
-      const dataParadaHistorico = ehStatusIndisponivel(statusNovo)
-        ? extrairDataParadaDoHistorico(item)
-        : null;
+      const dataHistorico = obterDataReferenciaHistorico(item);
 
       return {
-        data: dataParadaHistorico || dataHistorico,
+        data: dataHistorico,
         statusNovo,
         acao: item.acao || ""
       };
@@ -1202,7 +1227,7 @@ function atualizarDisponibilidadeDia() {
 
   tbody.innerHTML = resultados.map(({ equipamento, calculo }) => `
     <tr>
-      <td>${textoSeguro(equipamento.frota)}</td>
+      <td>${renderizarBotaoRegistrosFrota(equipamento.frota)}</td>
       <td>${textoSeguro(equipamento.tipo || "-")}</td>
       <td>${textoSeguro(equipamento.conjunto || "-")}</td>
       <td>${calculo.intervalos.length}</td>
@@ -1289,6 +1314,94 @@ function atualizarLegendaGrafico(id, texto) {
 
   if (legenda) {
     legenda.innerText = texto;
+  }
+}
+
+function renderizarBotaoRegistrosFrota(frota) {
+  return `
+    <button class="frota-link" type="button" onclick="abrirRegistrosFrota(decodeURIComponent('${codificarParametro(frota || "")}'))">
+      ${textoSeguro(frota || "-")}
+    </button>
+  `;
+}
+
+function obterDataDisponibilidadeSelecionada() {
+  return document.getElementById("data-disponibilidade")?.value || obterDataLocalISO();
+}
+
+function historicoPertenceAoDia(item, dataISO) {
+  if (!dataISO) {
+    return true;
+  }
+
+  const { inicio, fim } = obterIntervaloDia(dataISO);
+  const dataReferencia = obterDataReferenciaHistorico(item);
+
+  return dataReferencia && dataReferencia >= inicio && dataReferencia <= fim;
+}
+
+function obterHistoricosOperacionaisDaFrota(frota, dataISO = "") {
+  return historicoCarregado
+    .filter(item => item.frota === frota)
+    .filter(item => ["ok", "pendente", "emprestimo"].includes(normalizarTexto(item.status_novo || "")))
+    .filter(item => historicoPertenceAoDia(item, dataISO))
+    .sort((a, b) => {
+      const dataA = obterDataReferenciaHistorico(a) || new Date(0);
+      const dataB = obterDataReferenciaHistorico(b) || new Date(0);
+      return dataA - dataB;
+    });
+}
+
+function abrirRegistrosFrota(frota) {
+  const modal = document.getElementById("modal-registros-frota");
+  const titulo = document.getElementById("modal-registros-titulo");
+  const descricao = document.getElementById("modal-registros-descricao");
+  const tbody = document.getElementById("modal-registros-lista");
+  const dataISO = obterDataDisponibilidadeSelecionada();
+
+  if (!modal || !titulo || !descricao || !tbody) {
+    return;
+  }
+
+  const registros = obterHistoricosOperacionaisDaFrota(frota, dataISO);
+
+  titulo.innerText = `Registros da frota ${frota}`;
+  descricao.innerText = `Lançamentos do dia ${dataISO.split("-").reverse().join("/")}.`;
+
+  if (registros.length === 0) {
+    tbody.innerHTML = `
+      <tr>
+        <td colspan="7">Nenhum lançamento encontrado para esta frota nesse dia.</td>
+      </tr>
+    `;
+  } else {
+    tbody.innerHTML = registros.map(item => {
+      const dataReferencia = obterDataReferenciaHistorico(item);
+
+      return `
+        <tr>
+          <td>${formatarDataHora(dataReferencia)}</td>
+          <td>${textoSeguro(item.acao || "-")}</td>
+          <td><span class="${obterClasseStatus(item.status_novo)}">${textoSeguro(obterRotuloStatus(item.status_novo))}</span></td>
+          <td>${textoSeguro(item.observacao_nova || "-")}</td>
+          <td>${textoSeguro(item.numero_os || "-")}</td>
+          <td>${textoSeguro(item.previsao_saida || "-")}</td>
+          <td class="historico-acoes">${renderizarAcoesHistorico(item, { manterModalRegistros: true })}</td>
+        </tr>
+      `;
+    }).join("");
+  }
+
+  modal.style.display = "flex";
+  modal.setAttribute("aria-hidden", "false");
+}
+
+function fecharRegistrosFrota() {
+  const modal = document.getElementById("modal-registros-frota");
+
+  if (modal) {
+    modal.style.display = "none";
+    modal.setAttribute("aria-hidden", "true");
   }
 }
 
@@ -1460,7 +1573,7 @@ function renderizarTabelaDisponibilidadeTipo(resultados) {
 
   return resultados.map(({ equipamento, calculo }) => `
     <tr>
-      <td>${textoSeguro(equipamento.frota)}</td>
+      <td>${renderizarBotaoRegistrosFrota(equipamento.frota)}</td>
       <td>${calculo.intervalos.length}</td>
       <td>${formatarDuracao(calculo.tempoParadoMs)}</td>
       <td>${calculo.disponibilidade.toFixed(1)}%</td>
@@ -2243,22 +2356,32 @@ async function confirmarAlteracao(tipoConfirmacao) {
       return;
     }
 
-    await supabaseClient
-      .from("historico_movimentacoes")
-      .insert({
-        frota,
-        acao: acaoHistorico,
-        status_anterior: "PENDENTE",
-        status_novo: "PENDENTE",
-        observacao_anterior: equipamento.observacao || "",
-        observacao_nova: observacaoHistorico,
-        numero_os: novaOS,
-        previsao_saida: novaPrevisao,
-        mensagem_original: `Confirmação: ${tipoConfirmacao} motivo para ${motivoNovo}`
-      });
+    const dataHistorico = dataParadoNovo || equipamento.data_parado || obterAgoraISO();
+    const { error: erroHistorico, duplicado } = await inserirHistoricoSemDuplicidade({
+      frota,
+      acao: acaoHistorico,
+      status_anterior: "PENDENTE",
+      status_novo: "PENDENTE",
+      observacao_anterior: equipamento.observacao || "",
+      observacao_nova: observacaoHistorico,
+      numero_os: novaOS,
+      previsao_saida: novaPrevisao,
+      mensagem_original: `Confirmação: ${tipoConfirmacao} motivo para ${motivoNovo}`,
+      created_at: dataHistorico
+    });
+
+    const avisoHistorico = erroHistorico
+      ? duplicado
+        ? "\nO histórico não foi duplicado porque já existia lançamento PENDENTE neste horário."
+        : "\nA alteração foi aplicada, mas houve erro ao registrar o histórico."
+      : "";
+
+    if (erroHistorico) {
+      console.error("Erro ao registrar histórico:", erroHistorico);
+    }
 
     respostaChat.innerText =
-      `Alteração confirmada para ${nomeSingular} ${frota}.\n\n` +
+      `Alteração confirmada para ${nomeSingular} ${frota}.${avisoHistorico}\n\n` +
       `Novo motivo: ${novaObservacao}\n` +
       `O.S: ${novaOS || "Não informada"}\n` +
       `Previsão: ${novaPrevisao || "Sem previsão"}\n` +
@@ -2289,7 +2412,8 @@ async function carregarHistorico() {
       return;
     }
 
-    historicoCarregado = data || [];
+    const historicoVisivel = (data || []).filter(item => !lancamentoHistoricoEstaExcluido(item));
+    historicoCarregado = historicoVisivel;
 
     const tbody = document.getElementById("tabela-historico");
 
@@ -2300,17 +2424,17 @@ async function carregarHistorico() {
 
     tbody.innerHTML = "";
 
-    if (!data || data.length === 0) {
+    if (!historicoVisivel || historicoVisivel.length === 0) {
       tbody.innerHTML = `
         <tr>
-          <td colspan="9">Nenhuma movimentação registrada ainda.</td>
+          <td colspan="10">Nenhuma movimentação registrada ainda.</td>
         </tr>
       `;
       atualizarDisponibilidadeDia();
       return;
     }
 
-    data.forEach(item => {
+    historicoVisivel.forEach(item => {
       const tr = document.createElement("tr");
 
       const dataMovimentacao = item.created_at
@@ -2327,6 +2451,7 @@ async function carregarHistorico() {
         <td>${textoSeguro(item.observacao_nova || "-")}</td>
         <td>${textoSeguro(item.numero_os || "-")}</td>
         <td>${textoSeguro(item.previsao_saida || "-")}</td>
+        <td class="historico-acoes">${renderizarAcoesHistorico(item)}</td>
       `;
 
       tbody.appendChild(tr);
@@ -2337,6 +2462,433 @@ async function carregarHistorico() {
   } catch (erro) {
     alert("Erro ao carregar histórico.");
     console.error(erro);
+  }
+}
+
+function renderizarAcoesHistorico(item, opcoes = {}) {
+  const statusOperacional = ["ok", "pendente", "emprestimo"].includes(normalizarTexto(item?.status_novo || ""));
+
+  if (!item || !item.id || !statusOperacional) {
+    return "-";
+  }
+
+  const itemCodificado = codificarParametro(JSON.stringify(item));
+  const idCodificado = codificarParametro(item.id);
+  const frotaCodificada = codificarParametro(item.frota || "");
+  const manterModal = opcoes.manterModalRegistros ? "true" : "false";
+
+  return `
+    <div class="historico-acoes-wrap">
+      <button class="btn-editar" onclick="editarHistoricoCodificado('${itemCodificado}', ${manterModal})">Editar</button>
+      <button class="btn-excluir" onclick="excluirLancamentoHistorico(decodeURIComponent('${idCodificado}'), decodeURIComponent('${frotaCodificada}'), ${manterModal})">Excluir</button>
+    </div>
+  `;
+}
+
+function lancamentoHistoricoEstaExcluido(item) {
+  const acao = normalizarTexto(item?.acao || "");
+  const statusNovo = normalizarTexto(item?.status_novo || "");
+
+  return acao === "lancamento_excluido" || statusNovo === "excluido";
+}
+
+function datasNoMesmoMinuto(dataA, dataB) {
+  if (!dataA || !dataB) {
+    return false;
+  }
+
+  return Math.abs(dataA - dataB) < 60000;
+}
+
+async function buscarLancamentoDuplicado({ frota, status_novo, observacao_nova, created_at }, ignorarId = "") {
+  const dataReferencia = obterDataReferenciaHistorico({
+    status_novo,
+    observacao_nova,
+    created_at
+  }) || parseDataHora(created_at) || new Date();
+
+  const { data, error } = await supabaseClient
+    .from("historico_movimentacoes")
+    .select("*")
+    .eq("frota", frota)
+    .eq("status_novo", status_novo)
+    .limit(500);
+
+  if (error) {
+    console.error("Erro ao verificar duplicidade:", error);
+    return null;
+  }
+
+  return (data || []).find(item =>
+    item.id !== ignorarId &&
+    !lancamentoHistoricoEstaExcluido(item) &&
+    datasNoMesmoMinuto(obterDataReferenciaHistorico(item), dataReferencia)
+  ) || null;
+}
+
+async function inserirHistoricoSemDuplicidade(payload, ignorarId = "") {
+  const duplicado = await buscarLancamentoDuplicado(payload, ignorarId);
+
+  if (duplicado) {
+    return {
+      data: null,
+      error: new Error(`Já existe lançamento ${payload.status_novo} para a frota ${payload.frota} neste mesmo horário.`),
+      duplicado
+    };
+  }
+
+  return supabaseClient
+    .from("historico_movimentacoes")
+    .insert(payload);
+}
+
+async function inserirHistoricosSemDuplicidade(payloads) {
+  const resultados = [];
+
+  for (const payload of payloads) {
+    resultados.push(await inserirHistoricoSemDuplicidade(payload));
+  }
+
+  return resultados;
+}
+
+function editarHistoricoCodificado(itemCodificado, veioDoModalRegistros = false) {
+  abrirModalEdicaoHistorico(JSON.parse(decodeURIComponent(itemCodificado)), veioDoModalRegistros);
+}
+
+function abrirModalEdicaoHistorico(item, veioDoModalRegistros = false) {
+  const modal = document.getElementById("modal-historico-lancamento");
+
+  if (!modal || !item?.id) {
+    alert("Não foi possível abrir este lançamento para edição.");
+    return;
+  }
+
+  historicoEmEdicao = {
+    ...item,
+    veioDoModalRegistros
+  };
+
+  document.getElementById("hist-frota").value = item.frota || "";
+  document.getElementById("hist-data").value = formatarParaDatetimeLocal(obterDataReferenciaHistorico(item) || item.created_at);
+  document.getElementById("hist-status-novo").value = item.status_novo || "PENDENTE";
+  document.getElementById("hist-observacao-nova").value = item.observacao_nova || "";
+  document.getElementById("hist-os").value = item.numero_os || "";
+  document.getElementById("hist-previsao").value = item.previsao_saida || "";
+
+  modal.style.display = "flex";
+  modal.setAttribute("aria-hidden", "false");
+}
+
+function cancelarEdicaoHistorico() {
+  const modal = document.getElementById("modal-historico-lancamento");
+
+  historicoEmEdicao = null;
+
+  if (modal) {
+    modal.style.display = "none";
+    modal.setAttribute("aria-hidden", "true");
+  }
+}
+
+function atualizarDataParadaNoTexto(texto, dataISO) {
+  const textoBase = (texto || "").trim();
+  const dataTexto = `Parada: ${formatarDataHora(dataISO)}`;
+
+  if (!textoBase) {
+    return dataTexto;
+  }
+
+  if (normalizarTexto(textoBase).includes("parada:")) {
+    return textoBase.replace(/parada:\s*[^|]+/i, dataTexto);
+  }
+
+  return `${textoBase} | ${dataTexto}`;
+}
+
+function atualizarDataInicioNoTexto(texto, dataISO) {
+  const textoBase = (texto || "").trim();
+  const dataTexto = `Início: ${formatarDataHora(dataISO)}`;
+
+  if (!textoBase) {
+    return `Liberado | ${dataTexto}`;
+  }
+
+  if (normalizarTexto(textoBase).includes("inicio:")) {
+    return textoBase.replace(/in[ií]cio:\s*[^|]+/i, dataTexto);
+  }
+
+  if (/(liberad[ao]|liberou)\s+em\s*[^|]+/i.test(textoBase)) {
+    return textoBase.replace(/(liberad[ao]|liberou)\s+em\s*[^|]+/i, `$1 em ${formatarDataHora(dataISO)}`);
+  }
+
+  return `${textoBase} | ${dataTexto}`;
+}
+
+function atualizarResumoLiberacaoNoTexto(texto, dataISO) {
+  const textoComInicio = atualizarDataInicioNoTexto(texto, dataISO);
+  const parada = extrairDataParadaDoHistorico({ observacao_nova: textoComInicio, mensagem_original: "" });
+  const inicio = parseDataHora(dataISO);
+
+  if (!parada || !inicio) {
+    return textoComInicio;
+  }
+
+  const textoTempo = `Tempo parado: ${formatarDuracao(inicio - parada)}`;
+
+  if (normalizarTexto(textoComInicio).includes("tempo parado:")) {
+    return textoComInicio.replace(/tempo parado:\s*[^|]+/i, textoTempo);
+  }
+
+  return `${textoComInicio} | ${textoTempo}`;
+}
+
+function removerMarcadorParada(texto) {
+  return (texto || "")
+    .replace(/\s*\|\s*parada:\s*[^|]+/i, "")
+    .replace(/^parada:\s*[^|]+$/i, "")
+    .trim();
+}
+
+async function obterUltimoHistoricoOperacional(frota) {
+  const { data, error } = await supabaseClient
+    .from("historico_movimentacoes")
+    .select("*")
+    .eq("frota", frota)
+    .in("status_novo", ["OK", "PENDENTE", "EMPRESTIMO"])
+    .order("created_at", { ascending: false })
+    .limit(500);
+
+  if (error) {
+    console.error("Erro ao buscar último histórico operacional:", error);
+    return null;
+  }
+
+  const historicosOrdenados = (data || [])
+    .filter(item => !lancamentoHistoricoEstaExcluido(item))
+    .sort((a, b) => {
+      const dataA = obterDataReferenciaHistorico(a) || new Date(0);
+      const dataB = obterDataReferenciaHistorico(b) || new Date(0);
+      return dataB - dataA;
+    });
+
+  return historicosOrdenados.length ? historicosOrdenados[0] : null;
+}
+
+async function sincronizarEquipamentoComUltimoHistorico(frota) {
+  if (!frota) {
+    return;
+  }
+
+  const ultimo = await obterUltimoHistoricoOperacional(frota);
+
+  if (!ultimo) {
+    const { error } = await supabaseClient
+      .from("equipamentos")
+      .update({
+        status: "OK",
+        observacao: "Liberado",
+        numero_os: "",
+        data_parado: "",
+        previsao_saida: "",
+        updated_at: obterAgoraISO()
+      })
+      .eq("frota", frota);
+
+    if (error) {
+      console.error("Erro ao sincronizar equipamento sem histórico:", error);
+    }
+
+    return;
+  }
+
+  const statusNovo = ultimo.status_novo || "OK";
+  const dataBase = obterDataReferenciaHistorico(ultimo) || parseDataHora(ultimo.created_at) || new Date();
+  const dados = {
+    status: statusNovo,
+    observacao: removerMarcadorParada(ultimo.observacao_nova || "") || obterRotuloStatus(statusNovo),
+    numero_os: ultimo.numero_os || "",
+    previsao_saida: ultimo.previsao_saida || "",
+    updated_at: obterAgoraISO()
+  };
+
+  if (ehStatusIndisponivel(statusNovo)) {
+    dados.data_parado = dataBase.toISOString();
+  } else {
+    dados.data_parado = "";
+    dados.numero_os = "";
+    dados.previsao_saida = "";
+  }
+
+  const { error } = await supabaseClient
+    .from("equipamentos")
+    .update(dados)
+    .eq("frota", frota);
+
+  if (error) {
+    console.error("Erro ao sincronizar equipamento com histórico:", error);
+  }
+}
+
+async function salvarEdicaoHistorico() {
+  if (!historicoEmEdicao?.id) {
+    alert("Nenhum lançamento está em edição.");
+    return;
+  }
+
+  const dataISO = obterDataHoraInputComoISO("hist-data");
+  const statusNovo = document.getElementById("hist-status-novo").value;
+  const observacaoDigitada = document.getElementById("hist-observacao-nova").value.trim();
+  const numeroOS = document.getElementById("hist-os").value.trim();
+  const previsao = document.getElementById("hist-previsao").value.trim();
+
+  if (!dataISO) {
+    alert("Informe uma data/hora válida para o lançamento.");
+    return;
+  }
+
+  const observacaoNova = ehStatusIndisponivel(statusNovo)
+    ? atualizarDataParadaNoTexto(observacaoDigitada || obterRotuloStatus(statusNovo), dataISO)
+    : atualizarResumoLiberacaoNoTexto(observacaoDigitada || "Liberado", dataISO);
+
+  try {
+    const duplicado = await buscarLancamentoDuplicado({
+      frota: historicoEmEdicao.frota || document.getElementById("hist-frota").value.trim(),
+      status_novo: statusNovo,
+      observacao_nova: observacaoNova,
+      created_at: dataISO
+    }, historicoEmEdicao.id);
+
+    if (duplicado) {
+      alert("Já existe um lançamento para esta frota, status e horário. Ajuste o horário ou edite o lançamento existente.");
+      return;
+    }
+
+    const { data: editados, error } = await supabaseClient
+      .from("historico_movimentacoes")
+      .update({
+        created_at: dataISO,
+        status_novo: statusNovo,
+        observacao_nova: observacaoNova,
+        numero_os: numeroOS,
+        previsao_saida: previsao
+      })
+      .eq("id", historicoEmEdicao.id)
+      .select("id");
+
+    if (error) {
+      console.error("Erro ao editar lançamento:", error);
+      alert("Erro ao editar lançamento.");
+      return;
+    }
+
+    if (!Array.isArray(editados) || editados.length === 0) {
+      alert("Nenhum lançamento foi editado. Verifique as permissões da tabela historico_movimentacoes no Supabase.");
+      return;
+    }
+
+    const frota = historicoEmEdicao.frota || document.getElementById("hist-frota").value.trim();
+    const reabrirRegistros = historicoEmEdicao.veioDoModalRegistros;
+
+    cancelarEdicaoHistorico();
+
+    await sincronizarEquipamentoComUltimoHistorico(frota);
+    await carregarEquipamentos();
+    await carregarHistorico();
+    await gerarRelatorio();
+
+    if (reabrirRegistros) {
+      abrirRegistrosFrota(frota);
+    }
+
+    alert("Lançamento editado com sucesso.");
+
+  } catch (erro) {
+    console.error(erro);
+    alert("Erro ao editar lançamento.");
+  }
+}
+
+async function marcarLancamentoHistoricoExcluido(id) {
+  const { data, error } = await supabaseClient
+    .from("historico_movimentacoes")
+    .update({
+      acao: "LANCAMENTO_EXCLUIDO",
+      status_novo: "EXCLUIDO",
+      observacao_nova: "Lançamento excluído",
+      numero_os: "",
+      previsao_saida: ""
+    })
+    .eq("id", id)
+    .select("id");
+
+  if (error) {
+    return { sucesso: false, error };
+  }
+
+  return { sucesso: Array.isArray(data) && data.length > 0, error: null };
+}
+
+async function removerLancamentoHistorico(id) {
+  const { data, error } = await supabaseClient
+    .from("historico_movimentacoes")
+    .delete()
+    .eq("id", id)
+    .select("id");
+
+  if (!error && Array.isArray(data) && data.length > 0) {
+    return { sucesso: true, modo: "delete" };
+  }
+
+  const fallback = await marcarLancamentoHistoricoExcluido(id);
+
+  if (fallback.sucesso) {
+    return { sucesso: true, modo: "soft-delete" };
+  }
+
+  return {
+    sucesso: false,
+    error: error || fallback.error || new Error("Nenhuma linha foi removida ou marcada como excluída.")
+  };
+}
+
+async function excluirLancamentoHistorico(id, frota, veioDoModalRegistros = false) {
+  if (!id) {
+    alert("Não foi possível identificar o lançamento para excluir.");
+    return;
+  }
+
+  const confirmar = confirm(
+    `Deseja excluir este lançamento do histórico${frota ? ` da frota ${frota}` : ""}?\n\nIsso altera o cálculo da disponibilidade.`
+  );
+
+  if (!confirmar) {
+    return;
+  }
+
+  try {
+    const resultado = await removerLancamentoHistorico(id);
+
+    if (!resultado.sucesso) {
+      console.error("Erro ao excluir lançamento:", resultado.error);
+      alert("Não consegui excluir este lançamento. Verifique as permissões da tabela historico_movimentacoes no Supabase.");
+      return;
+    }
+
+    await sincronizarEquipamentoComUltimoHistorico(frota);
+    await carregarEquipamentos();
+    await carregarHistorico();
+    await gerarRelatorio();
+
+    if (veioDoModalRegistros) {
+      abrirRegistrosFrota(frota);
+    }
+
+    alert("Lançamento excluído com sucesso.");
+
+  } catch (erro) {
+    console.error(erro);
+    alert("Erro ao excluir lançamento.");
   }
 }
 
@@ -2833,21 +3385,27 @@ async function salvarEdicaoEquipamento() {
       return;
     }
 
-    await supabaseClient
-      .from("historico_movimentacoes")
-      .insert({
-        frota: nova_frota,
-        acao: "EDITOU_EQUIPAMENTO",
-        status_anterior: equipamentoAtual.status || "",
-        status_novo: status || "",
-        observacao_anterior: equipamentoAtual.observacao || "",
-        observacao_nova: observacaoHistorico || "",
-        numero_os: numero_os || "",
-        previsao_saida: previsao_saida || "",
-        mensagem_original: `Equipamento ${frotaEmEdicao} editado manualmente`
-      });
+    const dataHistoricoEdicao = ehStatusIndisponivel(status)
+      ? dadosEdicao.data_parado
+      : obterAgoraISO();
+    const { error: erroHistorico, duplicado } = await inserirHistoricoSemDuplicidade({
+      frota: nova_frota,
+      acao: "EDITOU_EQUIPAMENTO",
+      status_anterior: equipamentoAtual.status || "",
+      status_novo: status || "",
+      observacao_anterior: equipamentoAtual.observacao || "",
+      observacao_nova: observacaoHistorico || "",
+      numero_os: numero_os || "",
+      previsao_saida: previsao_saida || "",
+      mensagem_original: `Equipamento ${frotaEmEdicao} editado manualmente`,
+      created_at: dataHistoricoEdicao
+    });
 
-    alert(`Equipamento ${nova_frota} editado com sucesso.`);
+    if (erroHistorico && !duplicado) {
+      console.error("Erro ao registrar histórico da edição:", erroHistorico);
+    }
+
+    alert(`Equipamento ${nova_frota} editado com sucesso.${duplicado ? "\nO histórico não foi duplicado porque já existia lançamento neste horário." : ""}`);
 
     cancelarEdicao();
 
@@ -3061,22 +3619,25 @@ async function liberarReboquePeloChat(equipamento, frota, mensagem, respostaChat
     return;
   }
 
-  await supabaseClient
-    .from("historico_movimentacoes")
-    .insert({
-      frota,
-      acao: "LIBERADO",
-      status_anterior: equipamento.status || "",
-      status_novo: "OK",
-      observacao_anterior: equipamento.observacao || "",
-      observacao_nova: resumoLiberacao.texto,
-      numero_os: equipamento.numero_os || "",
-      previsao_saida: "",
-      mensagem_original: mensagem
-    });
+  const { error: erroHistorico, duplicado } = await inserirHistoricoSemDuplicidade({
+    frota,
+    acao: "LIBERADO",
+    status_anterior: equipamento.status || "",
+    status_novo: "OK",
+    observacao_anterior: equipamento.observacao || "",
+    observacao_nova: resumoLiberacao.texto,
+    numero_os: equipamento.numero_os || "",
+    previsao_saida: "",
+    mensagem_original: mensagem,
+    created_at: retorno.toISOString()
+  });
+
+  if (erroHistorico) {
+    console.error("Erro ao registrar histórico de liberação:", erroHistorico);
+  }
 
   respostaChat.innerText =
-    `${capitalizar(nomeSingular)} ${frota} liberado com sucesso.\n\n` +
+    `${capitalizar(nomeSingular)} ${frota} liberado com sucesso.${duplicado ? "\nO histórico não foi duplicado porque já existia lançamento neste horário." : ""}\n\n` +
     `Status anterior: ${equipamento.status}\n` +
     `Motivo anterior: ${equipamento.observacao || "Sem observação"}\n` +
     `Parada: ${resumoLiberacao.parada ? formatarDataHora(resumoLiberacao.parada) : "Não registrada"}\n` +
@@ -3134,22 +3695,25 @@ async function registrarEmprestimoPeloChat(equipamento, frota, mensagem, respost
     return;
   }
 
-  await supabaseClient
-    .from("historico_movimentacoes")
-    .insert({
-      frota,
-      acao: "EMPRESTIMO",
-      status_anterior: equipamento.status || "",
-      status_novo: "EMPRESTIMO",
-      observacao_anterior: equipamento.observacao || "",
-      observacao_nova: anexarDataParadaAoTexto(motivo, dataEmprestimo),
-      numero_os: "",
-      previsao_saida: "",
-      mensagem_original: mensagem
-    });
+  const { error: erroHistorico, duplicado } = await inserirHistoricoSemDuplicidade({
+    frota,
+    acao: "EMPRESTIMO",
+    status_anterior: equipamento.status || "",
+    status_novo: "EMPRESTIMO",
+    observacao_anterior: equipamento.observacao || "",
+    observacao_nova: anexarDataParadaAoTexto(motivo, dataEmprestimo),
+    numero_os: "",
+    previsao_saida: "",
+    mensagem_original: mensagem,
+    created_at: dataEmprestimo
+  });
+
+  if (erroHistorico) {
+    console.error("Erro ao registrar histórico de empréstimo:", erroHistorico);
+  }
 
   respostaChat.innerText =
-    `Caminhão ${frota} registrado em EMPRÉSTIMO.\n\n` +
+    `Caminhão ${frota} registrado em EMPRÉSTIMO.${duplicado ? "\nO histórico não foi duplicado porque já existia lançamento neste horário." : ""}\n\n` +
     `Motivo: ${motivo}\n` +
     `Início: ${formatarDataHora(dataEmprestimo)}${emprestimoInformado ? " (informado no agente)" : ""}`;
 
@@ -3248,22 +3812,25 @@ async function pararReboquePeloChat(equipamento, frota, mensagem, respostaChat) 
     return;
   }
 
-  await supabaseClient
-    .from("historico_movimentacoes")
-    .insert({
-      frota,
-      acao: "PARADO",
-      status_anterior: equipamento.status || "",
-      status_novo: "PENDENTE",
-      observacao_anterior: equipamento.observacao || "",
-      observacao_nova: anexarDataParadaAoTexto(motivo, dataParado),
-      numero_os: numeroOS,
-      previsao_saida: previsao,
-      mensagem_original: mensagem
-    });
+  const { error: erroHistorico, duplicado } = await inserirHistoricoSemDuplicidade({
+    frota,
+    acao: "PARADO",
+    status_anterior: equipamento.status || "",
+    status_novo: "PENDENTE",
+    observacao_anterior: equipamento.observacao || "",
+    observacao_nova: anexarDataParadaAoTexto(motivo, dataParado),
+    numero_os: numeroOS,
+    previsao_saida: previsao,
+    mensagem_original: mensagem,
+    created_at: dataParado
+  });
+
+  if (erroHistorico) {
+    console.error("Erro ao registrar histórico de parada:", erroHistorico);
+  }
 
   respostaChat.innerText =
-    `${capitalizar(nomeSingular)} ${frota} atualizado como PENDENTE.\n\n` +
+    `${capitalizar(nomeSingular)} ${frota} atualizado como PENDENTE.${duplicado ? "\nO histórico não foi duplicado porque já existia lançamento neste horário." : ""}\n\n` +
     `Motivo: ${motivo}\n` +
     `Parada: ${formatarDataHora(dataParado)}${paradaInformada ? " (informada no agente)" : ""}\n` +
     `O.S: ${numeroOS || "Não informada"}\n` +
@@ -3433,19 +4000,23 @@ async function processarListaDePendentes(mensagem, respostaChat) {
           continue;
         }
 
-        await supabaseClient
-          .from("historico_movimentacoes")
-          .insert({
-            frota: item.frota,
-            acao: "CADASTROU_E_PAROU_LISTA",
-            status_anterior: "",
-            status_novo: "PENDENTE",
-            observacao_anterior: "",
-            observacao_nova: anexarDataParadaAoTexto(item.motivo, dataParadoItem),
-            numero_os: item.numero_os,
-            previsao_saida: item.previsao_saida,
-            mensagem_original: "Importado por lista de pendentes"
-          });
+        const { error: erroHistorico, duplicado } = await inserirHistoricoSemDuplicidade({
+          frota: item.frota,
+          acao: "CADASTROU_E_PAROU_LISTA",
+          status_anterior: "",
+          status_novo: "PENDENTE",
+          observacao_anterior: "",
+          observacao_nova: anexarDataParadaAoTexto(item.motivo, dataParadoItem),
+          numero_os: item.numero_os,
+          previsao_saida: item.previsao_saida,
+          mensagem_original: "Importado por lista de pendentes",
+          created_at: dataParadoItem
+        });
+
+        if (erroHistorico && !duplicado) {
+          console.error("Erro ao registrar histórico da lista:", erroHistorico);
+          erros.push(`${item.frota}: cadastrado, mas erro no histórico`);
+        }
 
         cadastrados++;
         continue;
@@ -3469,22 +4040,27 @@ async function processarListaDePendentes(mensagem, respostaChat) {
         continue;
       }
 
-      await supabaseClient
-        .from("historico_movimentacoes")
-        .insert({
-          frota: item.frota,
-          acao: "ATUALIZOU_POR_LISTA",
-          status_anterior: equipamentoExistente.status || "",
-          status_novo: "PENDENTE",
-          observacao_anterior: equipamentoExistente.observacao || "",
-          observacao_nova: anexarDataParadaAoTexto(
-            item.motivo,
-            item.data_parado || equipamentoExistente.data_parado || obterAgoraISO()
-          ),
-          numero_os: item.numero_os,
-          previsao_saida: item.previsao_saida,
-          mensagem_original: "Atualizado por lista de pendentes"
-        });
+      const dataHistoricoItem = item.data_parado || equipamentoExistente.data_parado || obterAgoraISO();
+      const { error: erroHistorico, duplicado } = await inserirHistoricoSemDuplicidade({
+        frota: item.frota,
+        acao: "ATUALIZOU_POR_LISTA",
+        status_anterior: equipamentoExistente.status || "",
+        status_novo: "PENDENTE",
+        observacao_anterior: equipamentoExistente.observacao || "",
+        observacao_nova: anexarDataParadaAoTexto(
+          item.motivo,
+          dataHistoricoItem
+        ),
+        numero_os: item.numero_os,
+        previsao_saida: item.previsao_saida,
+        mensagem_original: "Atualizado por lista de pendentes",
+        created_at: dataHistoricoItem
+      });
+
+      if (erroHistorico && !duplicado) {
+        console.error("Erro ao registrar histórico da lista:", erroHistorico);
+        erros.push(`${item.frota}: atualizado, mas erro no histórico`);
+      }
 
       atualizados++;
 
@@ -3587,16 +4163,20 @@ async function confirmarAcaoEmMassa(acao) {
         observacao_nova: obterResumoLiberacao(e, retorno).texto,
         numero_os: e.numero_os || "",
         previsao_saida: "",
+        created_at: retorno.toISOString(),
         mensagem_original: frenteAlvo
           ? `Comando: liberar todos da frente ${frenteAlvo}`
           : "Comando: liberar todos"
       }));
 
-      await supabaseClient
-        .from("historico_movimentacoes")
-        .insert(historicos);
+      const resultadosHistorico = await inserirHistoricosSemDuplicidade(historicos);
+      const duplicados = resultadosHistorico.filter(resultado => resultado.duplicado).length;
+      const errosHistorico = resultadosHistorico.filter(resultado => resultado.error && !resultado.duplicado).length;
 
-      respostaChat.innerText = `${pendentesDaAba.length} ${descricaoAcao.plural} foram liberados com sucesso${frenteAlvo ? ` na frente ${frenteAlvo}` : ""}.`;
+      respostaChat.innerText =
+        `${pendentesDaAba.length} ${descricaoAcao.plural} foram liberados com sucesso${frenteAlvo ? ` na frente ${frenteAlvo}` : ""}.` +
+        `${duplicados ? `\n${duplicados} lançamento(s) já existiam no mesmo horário e não foram duplicados.` : ""}` +
+        `${errosHistorico ? `\n${errosHistorico} lançamento(s) não foram gravados no histórico por erro do banco.` : ""}`;
 
       confirmacaoMassa = null;
 
