@@ -722,6 +722,7 @@ td.status-pendente {
   text-align: center;
 }
 
+.disponibilidade-categorias,
 .disponibilidade-frentes {
   display: grid;
   gap: 14px;
