@@ -192,7 +192,7 @@ function obterDataHoraInputComoISO(inputId) {
 }
 
 function obterDataParadoParaStatus(status, inputId, valorAtual = "") {
-  if (status !== "PENDENTE") {
+  if (!ehStatusIndisponivel(status)) {
     return "";
   }
 
@@ -273,7 +273,7 @@ function montarDataHoraLocal(dataBase, horario) {
 
 function extrairDataHoraParadaDaMensagem(mensagem) {
   const texto = (mensagem || "").toString();
-  const gatilho = "(?:desde|parad[ao]\\s*(?:desde|em|a partir de|às|as)?|parou\\s*(?:desde|em|às|as)?|liberad[ao]\\s*(?:em|às|as)?|liberou\\s*(?:em|às|as)?|in[ií]cio\\s*(?:da\\s*parada)?\\s*(?:em|às|as)?|às|as)";
+  const gatilho = "(?:desde|parad[ao]\\s*(?:desde|em|a partir de|às|as)?|parou\\s*(?:desde|em|às|as)?|liberad[ao]\\s*(?:em|às|as)?|liberou\\s*(?:em|às|as)?|empr[eé]stimo\\s*(?:em|desde|às|as)?|emprestad[ao]\\s*(?:em|desde|às|as)?|in[ií]cio\\s*(?:da\\s*parada)?\\s*(?:em|às|as)?|às|as)";
   const data = "(hoje|ontem|\\d{1,2}\\/\\d{1,2}(?:\\/\\d{2,4})?|\\d{4}-\\d{2}-\\d{2})";
   const hora = "(\\d{1,2}(?::\\d{2}|h\\d{0,2})?)";
   const regex = new RegExp(`(?:^|\\s)${gatilho}\\s*(?:${data}\\s*)?(?:às|as)?\\s*${hora}`, "i");
@@ -337,15 +337,23 @@ function abrirModalHorarioAgente({ equipamento, frota, mensagem, acao, respostaC
 
   titulo.innerText = ehLiberacao
     ? "Horário da liberação"
-    : "Horário da parada";
+    : acao === "emprestimo"
+      ? "Horário do empréstimo"
+      : "Horário da parada";
 
   descricao.innerText = ehLiberacao
     ? "Informe a data e hora em que o equipamento voltou a trabalhar."
-    : "Informe a data e hora em que o equipamento parou.";
+    : acao === "emprestimo"
+      ? "Informe a data e hora em que o caminhão entrou em empréstimo."
+      : "Informe a data e hora em que o equipamento parou.";
 
   resumo.innerText = `${capitalizar(nomeSingular)} ${frota}\nComando: ${mensagem}`;
   input.value = formatarParaDatetimeLocal(new Date());
-  botao.innerText = ehLiberacao ? "Confirmar liberação" : "Confirmar parada";
+  botao.innerText = ehLiberacao
+    ? "Confirmar liberação"
+    : acao === "emprestimo"
+      ? "Confirmar empréstimo"
+      : "Confirmar parada";
   modal.style.display = "flex";
   modal.setAttribute("aria-hidden", "false");
   input.focus();
@@ -397,7 +405,9 @@ async function confirmarHorarioAgente() {
   const { equipamento, frota, mensagem, acao } = confirmacaoHorarioAgente;
   const trechoHorario = acao === "liberar"
     ? `liberado em ${horarioTexto}`
-    : `parada em ${horarioTexto}`;
+    : acao === "emprestimo"
+      ? `empréstimo em ${horarioTexto}`
+      : `parada em ${horarioTexto}`;
   const mensagemComHorario = `${mensagem} | ${trechoHorario}`;
 
   confirmacaoHorarioAgente = null;
@@ -405,6 +415,11 @@ async function confirmarHorarioAgente() {
 
   if (acao === "liberar") {
     await liberarReboquePeloChat(equipamento, frota, mensagemComHorario, respostaChat);
+    return;
+  }
+
+  if (acao === "emprestimo") {
+    await registrarEmprestimoPeloChat(equipamento, frota, mensagemComHorario, respostaChat);
     return;
   }
 
@@ -612,6 +627,36 @@ function selecionarTipoNoCadastro(tipo) {
   }
 
   selectTipo.value = valor;
+  atualizarOpcoesStatusCadastro();
+}
+
+function atualizarOpcoesStatusCadastro(valorPreferido = "") {
+  const selectStatus = document.getElementById("cad-status");
+  const selectTipo = document.getElementById("cad-tipo");
+
+  if (!selectStatus) {
+    return;
+  }
+
+  const tipoSelecionado = selectTipo?.value || obterConfiguracaoAba().tipoPadrao;
+  const mostrarEmprestimo = abaAtual === "CAMINHOES_PROPRIOS" || obterAbaDoTipo(tipoSelecionado) === "CAMINHOES_PROPRIOS";
+  const valorAtual = valorPreferido || selectStatus.value || "OK";
+  const opcoes = mostrarEmprestimo
+    ? [
+        { valor: "OK", texto: "Disponível" },
+        { valor: "PENDENTE", texto: "Parado" },
+        { valor: "EMPRESTIMO", texto: "Empréstimo" }
+      ]
+    : [
+        { valor: "OK", texto: "OK" },
+        { valor: "PENDENTE", texto: "Pendente" }
+      ];
+
+  selectStatus.innerHTML = opcoes
+    .map(opcao => `<option value="${opcao.valor}">${opcao.texto}</option>`)
+    .join("");
+
+  selectStatus.value = opcoes.some(opcao => opcao.valor === valorAtual) ? valorAtual : "OK";
 }
 
 function atualizarCabecalhosDaAba() {
@@ -623,6 +668,8 @@ function atualizarCabecalhosDaAba() {
   const tituloRelatorio = document.getElementById("titulo-relatorio");
   const mensagemChat = document.getElementById("mensagem-chat");
   const relatorio = document.getElementById("relatorio");
+  const tituloCardOk = document.querySelector(".container > .cards:not(.disponibilidade-cards) .card.ok h3");
+  const tituloCardPendente = document.querySelector(".container > .cards:not(.disponibilidade-cards) .card.pendente h3");
 
   if (resumoAba) {
     resumoAba.innerText = config.descricao;
@@ -638,6 +685,14 @@ function atualizarCabecalhosDaAba() {
 
   if (tituloRelatorio) {
     tituloRelatorio.innerText = config.tituloRelatorioTela;
+  }
+
+  if (tituloCardOk) {
+    tituloCardOk.innerText = abaAtual === "CAMINHOES_PROPRIOS" ? "Disponíveis" : "OK";
+  }
+
+  if (tituloCardPendente) {
+    tituloCardPendente.innerText = abaAtual === "CAMINHOES_PROPRIOS" ? "Parados / Empréstimo" : "Pendentes";
   }
 
   if (mensagemChat) {
@@ -671,7 +726,7 @@ function atualizarContadoresAbas() {
     if (aba === "DISPONIBILIDADE" || aba === "AGENTE") {
       const equipamentosOperacionais = obterEquipamentosOperacionais(equipamentosCarregados);
       const totalDisponibilidade = equipamentosOperacionais.length;
-      const pendentesDisponibilidade = equipamentosOperacionais.filter(e => e.status === "PENDENTE").length;
+      const pendentesDisponibilidade = equipamentosOperacionais.filter(e => ehStatusIndisponivel(e.status)).length;
 
       botao.innerHTML = `
         ${config.rotulo}
@@ -681,7 +736,7 @@ function atualizarContadoresAbas() {
     }
 
     const total = obterEquipamentosDaAba(equipamentosCarregados, aba).length;
-    const pendentes = obterEquipamentosDaAba(equipamentosCarregados, aba).filter(e => e.status === "PENDENTE").length;
+    const pendentes = obterEquipamentosDaAba(equipamentosCarregados, aba).filter(e => ehStatusIndisponivel(e.status)).length;
 
     botao.innerHTML = `
       ${config.rotulo}
@@ -902,8 +957,50 @@ function ehStatusPendente(status) {
   return normalizarTexto(status) === "pendente";
 }
 
+function ehStatusEmprestimo(status) {
+  return normalizarTexto(status) === "emprestimo";
+}
+
+function ehStatusIndisponivel(status) {
+  return ehStatusPendente(status) || ehStatusEmprestimo(status);
+}
+
 function ehStatusOk(status) {
   return normalizarTexto(status) === "ok";
+}
+
+function equipamentoEhCaminhaoProprio(equipamento) {
+  return obterAbaDoEquipamento(equipamento) === "CAMINHOES_PROPRIOS";
+}
+
+function obterRotuloStatus(status, equipamento = null) {
+  if (ehStatusEmprestimo(status)) {
+    return "Empréstimo";
+  }
+
+  if (equipamento && equipamentoEhCaminhaoProprio(equipamento)) {
+    if (ehStatusOk(status)) {
+      return "Disponível";
+    }
+
+    if (ehStatusPendente(status)) {
+      return "Parado";
+    }
+  }
+
+  return status || "-";
+}
+
+function obterClasseStatus(status) {
+  if (ehStatusOk(status)) {
+    return "status-ok";
+  }
+
+  if (ehStatusEmprestimo(status)) {
+    return "status-emprestimo";
+  }
+
+  return "status-pendente";
 }
 
 function obterEventosHistoricoDoEquipamento(frota, equipamento) {
@@ -912,7 +1009,7 @@ function obterEventosHistoricoDoEquipamento(frota, equipamento) {
     .map(item => {
       const statusNovo = item.status_novo || "";
       const dataHistorico = parseDataHora(item.created_at);
-      const dataParadaHistorico = ehStatusPendente(statusNovo)
+      const dataParadaHistorico = ehStatusIndisponivel(statusNovo)
         ? extrairDataParadaDoHistorico(item)
         : null;
 
@@ -924,13 +1021,13 @@ function obterEventosHistoricoDoEquipamento(frota, equipamento) {
     })
     .filter(evento => evento.data);
 
-  if (ehStatusPendente(equipamento.status) && equipamento.data_parado) {
+  if (ehStatusIndisponivel(equipamento.status) && equipamento.data_parado) {
     const dataParado = parseDataHora(equipamento.data_parado);
 
     if (dataParado) {
       eventos.push({
         data: dataParado,
-        statusNovo: "PENDENTE",
+        statusNovo: equipamento.status || "PENDENTE",
         acao: "PARADA_ATUAL"
       });
     }
@@ -942,50 +1039,60 @@ function obterEventosHistoricoDoEquipamento(frota, equipamento) {
 function calcularParadasDoEquipamento(equipamento, dataISO) {
   const { inicio, fim } = obterIntervaloDia(dataISO);
   const eventos = obterEventosHistoricoDoEquipamento(equipamento.frota, equipamento);
-  let paradoDesde = null;
+  let indisponivelAtual = null;
   const intervalos = [];
+
+  function registrarIntervalo(fimOriginal) {
+    if (!indisponivelAtual) {
+      return;
+    }
+
+    const inicioIntervalo = indisponivelAtual.data < inicio ? inicio : indisponivelAtual.data;
+    const fimIntervalo = fimOriginal > fim ? fim : fimOriginal;
+
+    if (fimIntervalo > inicioIntervalo) {
+      intervalos.push({
+        inicio: inicioIntervalo,
+        fim: fimIntervalo,
+        duracaoMs: fimIntervalo - inicioIntervalo,
+        statusNovo: indisponivelAtual.statusNovo || "PENDENTE"
+      });
+    }
+  }
 
   eventos.forEach(evento => {
     if (evento.data > fim) {
       return;
     }
 
-    if (ehStatusPendente(evento.statusNovo)) {
-      if (!paradoDesde) {
-        paradoDesde = evento.data;
+    if (ehStatusIndisponivel(evento.statusNovo)) {
+      if (!indisponivelAtual) {
+        indisponivelAtual = {
+          data: evento.data,
+          statusNovo: evento.statusNovo
+        };
+        return;
+      }
+
+      if (normalizarTexto(indisponivelAtual.statusNovo) !== normalizarTexto(evento.statusNovo) && evento.data > indisponivelAtual.data) {
+        registrarIntervalo(evento.data);
+        indisponivelAtual = {
+          data: evento.data,
+          statusNovo: evento.statusNovo
+        };
       }
 
       return;
     }
 
     if (ehStatusOk(evento.statusNovo)) {
-      if (paradoDesde) {
-        const inicioIntervalo = paradoDesde < inicio ? inicio : paradoDesde;
-        const fimIntervalo = evento.data > fim ? fim : evento.data;
-
-        if (fimIntervalo > inicioIntervalo) {
-          intervalos.push({
-            inicio: inicioIntervalo,
-            fim: fimIntervalo,
-            duracaoMs: fimIntervalo - inicioIntervalo
-          });
-        }
-      }
-
-      paradoDesde = null;
+      registrarIntervalo(evento.data);
+      indisponivelAtual = null;
     }
   });
 
-  if (paradoDesde && fim > inicio) {
-    const inicioIntervalo = paradoDesde < inicio ? inicio : paradoDesde;
-
-    if (fim > inicioIntervalo) {
-      intervalos.push({
-        inicio: inicioIntervalo,
-        fim,
-        duracaoMs: fim - inicioIntervalo
-      });
-    }
+  if (indisponivelAtual && fim > inicio) {
+    registrarIntervalo(fim);
   }
 
   const tempoParadoMs = intervalos.reduce((total, intervalo) => total + intervalo.duracaoMs, 0);
@@ -1112,8 +1219,21 @@ function calcularDisponibilidadeEquipamentos(equipamentos, dataISO) {
   }));
 }
 
+function somarTempoIntervalos(resultados, filtroIntervalo) {
+  return resultados.reduce((total, item) => {
+    const intervalos = item.calculo.intervalos || [];
+    const subtotal = intervalos
+      .filter(filtroIntervalo)
+      .reduce((soma, intervalo) => soma + intervalo.duracaoMs, 0);
+
+    return total + subtotal;
+  }, 0);
+}
+
 function calcularResumoDisponibilidade(resultados) {
   const tempoParadoTotal = resultados.reduce((total, item) => total + item.calculo.tempoParadoMs, 0);
+  const tempoEmprestimoTotal = somarTempoIntervalos(resultados, intervalo => ehStatusEmprestimo(intervalo.statusNovo));
+  const tempoParadoOperacional = Math.max(0, tempoParadoTotal - tempoEmprestimoTotal);
   const tempoBaseTotal = resultados.reduce((total, item) => total + item.calculo.tempoBaseMs, 0);
   const disponibilidade = tempoBaseTotal > 0
     ? Math.max(0, ((tempoBaseTotal - tempoParadoTotal) / tempoBaseTotal) * 100)
@@ -1122,8 +1242,25 @@ function calcularResumoDisponibilidade(resultados) {
   return {
     equipamentos: resultados.length,
     tempoParadoTotal,
+    tempoParadoOperacional,
+    tempoEmprestimoTotal,
     disponibilidade,
     paradas: resultados.reduce((total, item) => total + item.calculo.intervalos.length, 0)
+  };
+}
+
+function obterSeriesTempoDisponibilidade(resultados) {
+  const resumo = calcularResumoDisponibilidade(resultados);
+  const tempoDisponivel = resultados.reduce(
+    (total, item) => total + Math.max(0, item.calculo.tempoBaseMs - item.calculo.tempoParadoMs),
+    0
+  );
+
+  return {
+    resumo,
+    labels: ["Tempo disponível", "Tempo parado", "Tempo empréstimo"],
+    valores: [tempoDisponivel, resumo.tempoParadoOperacional, resumo.tempoEmprestimoTotal],
+    cores: ["#22c55e", "#ef4444", "#f59e0b"]
   };
 }
 
@@ -1228,12 +1365,10 @@ function obterTipoResumoDisponibilidade(equipamento) {
 }
 
 function atualizarGraficosDisponibilidade(resultados) {
-  const resumo = calcularResumoDisponibilidade(resultados);
-  const tempoOperando = Math.max(0, resumo.equipamentos > 0
-    ? resultados.reduce((total, item) => total + Math.max(0, item.calculo.tempoBaseMs - item.calculo.tempoParadoMs), 0)
-    : 0);
+  const { resumo, labels, valores, cores } = obterSeriesTempoDisponibilidade(resultados);
   const ok = resultados.filter(({ equipamento }) => ehStatusOk(equipamento.status)).length;
   const pendentes = resultados.filter(({ equipamento }) => ehStatusPendente(equipamento.status)).length;
+  const emprestimos = resultados.filter(({ equipamento }) => ehStatusEmprestimo(equipamento.status)).length;
   const tempoPorTipo = resultados.reduce((totais, { equipamento, calculo }) => {
     const tipo = obterTipoResumoDisponibilidade(equipamento);
     totais[tipo] = (totais[tipo] || 0) + calculo.tempoParadoMs;
@@ -1247,17 +1382,17 @@ function atualizarGraficosDisponibilidade(resultados) {
 
   graficoDisponibilidadeGeral = criarGraficoPizza(
     "grafico-disponibilidade-geral",
-    ["Tempo disponível", "Tempo parado"],
-    [tempoOperando, resumo.tempoParadoTotal],
-    ["#22c55e", "#ef4444"],
+    labels,
+    valores,
+    cores,
     { formatarValor: formatarDuracao }
   );
 
   graficoDisponibilidadeStatus = criarGraficoPizza(
     "grafico-disponibilidade-status",
-    ["OK", "Pendentes"],
-    [ok, pendentes],
-    ["#22c55e", "#ef4444"]
+    ["Disponíveis", "Parados", "Empréstimo"],
+    [ok, pendentes, emprestimos],
+    ["#22c55e", "#ef4444", "#f59e0b"]
   );
 
   graficoDisponibilidadeTipos = criarGraficoPizza(
@@ -1270,38 +1405,34 @@ function atualizarGraficosDisponibilidade(resultados) {
 
   atualizarLegendaGrafico(
     "legenda-disponibilidade-geral",
-    `${resumo.disponibilidade.toFixed(1)}% disponível | ${formatarDuracao(resumo.tempoParadoTotal)} parado`
+    `${resumo.disponibilidade.toFixed(1)}% disponível | ${formatarDuracao(resumo.tempoParadoOperacional)} parado | ${formatarDuracao(resumo.tempoEmprestimoTotal)} empréstimo`
   );
   atualizarLegendaGrafico(
     "legenda-disponibilidade-status",
-    `${ok} equipamentos OK | ${pendentes} pendentes`
+    `${ok} disponíveis | ${pendentes} parados | ${emprestimos} em empréstimo`
   );
   atualizarLegendaGrafico(
     "legenda-disponibilidade-tipos",
     resumo.tempoParadoTotal > 0
-      ? `Total parado no dia: ${formatarDuracao(resumo.tempoParadoTotal)}`
+      ? `Total indisponível no dia: ${formatarDuracao(resumo.tempoParadoTotal)}`
       : "Sem tempo parado registrado no dia"
   );
 }
 
 function atualizarGraficoDisponibilidadeTipo(chartId, resultados) {
-  const resumo = calcularResumoDisponibilidade(resultados);
-  const tempoOperando = resultados.reduce(
-    (total, item) => total + Math.max(0, item.calculo.tempoBaseMs - item.calculo.tempoParadoMs),
-    0
-  );
+  const { resumo, labels, valores, cores } = obterSeriesTempoDisponibilidade(resultados);
   const grafico = criarGraficoPizza(
     chartId,
-    ["Tempo disponível", "Tempo parado"],
-    [tempoOperando, resumo.tempoParadoTotal],
-    ["#22c55e", "#ef4444"],
+    labels,
+    valores,
+    cores,
     { formatarValor: formatarDuracao }
   );
 
   atualizarLegendaGrafico(
     `${chartId}-legenda`,
     resumo.equipamentos > 0
-      ? `${resumo.disponibilidade.toFixed(1)}% disponível | ${formatarDuracao(resumo.tempoParadoTotal)} parado`
+      ? `${resumo.disponibilidade.toFixed(1)}% disponível | ${formatarDuracao(resumo.tempoParadoOperacional)} parado | ${formatarDuracao(resumo.tempoEmprestimoTotal)} empréstimo`
       : "Sem equipamentos cadastrados"
   );
 
@@ -1357,7 +1488,7 @@ function renderizarDisponibilidadeTipo(titulo, resultados, chartId) {
           <strong>${resumo.equipamentos}</strong>
         </div>
         <div class="disponibilidade-metrica">
-          <span>Tempo parado</span>
+          <span>Indisponível</span>
           <strong>${formatarDuracao(resumo.tempoParadoTotal)}</strong>
         </div>
         <div class="disponibilidade-metrica">
@@ -1429,23 +1560,19 @@ function renderizarDisponibilidadePorCategoria(dataISO) {
   categorias.forEach(categoria => {
     const equipamentos = obterEquipamentosDaAba(equipamentosCarregados, categoria.aba);
     const resultados = calcularDisponibilidadeEquipamentos(equipamentos, dataISO);
+    const { resumo, labels, valores, cores } = obterSeriesTempoDisponibilidade(resultados);
     const grafico = criarGraficoPizza(
       categoria.chartId,
-      ["Tempo disponível", "Tempo parado"],
-      [
-        resultados.reduce((total, item) => total + Math.max(0, item.calculo.tempoBaseMs - item.calculo.tempoParadoMs), 0),
-        resultados.reduce((total, item) => total + item.calculo.tempoParadoMs, 0)
-      ],
-      ["#22c55e", "#ef4444"],
+      labels,
+      valores,
+      cores,
       { formatarValor: formatarDuracao }
     );
-
-    const resumo = calcularResumoDisponibilidade(resultados);
 
     atualizarLegendaGrafico(
       `${categoria.chartId}-legenda`,
       resumo.equipamentos > 0
-        ? `${resumo.disponibilidade.toFixed(1)}% disponível | ${formatarDuracao(resumo.tempoParadoTotal)} parado`
+        ? `${resumo.disponibilidade.toFixed(1)}% disponível | ${formatarDuracao(resumo.tempoParadoOperacional)} parado | ${formatarDuracao(resumo.tempoEmprestimoTotal)} empréstimo`
         : "Sem equipamentos cadastrados"
     );
 
@@ -1517,7 +1644,7 @@ function renderizarDisponibilidadePorFrente(dataISO) {
             <strong>${resumo.equipamentos}</strong>
           </div>
           <div class="disponibilidade-metrica">
-            <span>Tempo parado</span>
+            <span>Indisponível</span>
             <strong>${formatarDuracao(resumo.tempoParadoTotal)}</strong>
           </div>
           <div class="disponibilidade-metrica">
@@ -1571,14 +1698,14 @@ function preencherSelectFrentes() {
 function filtrarFrentesPorStatus(frentes) {
   if (filtroStatusAtual === "PENDENTE") {
     return frentes.filter(frente =>
-      obterEquipamentosDaFrente(frente.frota).some(equipamento => equipamento.status === "PENDENTE")
+      obterEquipamentosDaFrente(frente.frota).some(equipamento => ehStatusIndisponivel(equipamento.status))
     );
   }
 
   if (filtroStatusAtual === "OK") {
     return frentes.filter(frente => {
       const equipamentos = obterEquipamentosDaFrente(frente.frota);
-      return equipamentos.length > 0 && equipamentos.every(equipamento => equipamento.status === "OK");
+      return equipamentos.length > 0 && equipamentos.every(equipamento => ehStatusOk(equipamento.status));
     });
   }
 
@@ -1589,7 +1716,7 @@ function renderizarGrupoFrente(titulo, equipamentos) {
   const itens = equipamentos.map(equipamento => `
     <div class="equipamento-frente">
       <strong>${textoSeguro(equipamento.frota)}</strong>
-      <span class="${equipamento.status === "OK" ? "status-ok" : "status-pendente"}">${textoSeguro(equipamento.status || "-")}</span>
+      <span class="${obterClasseStatus(equipamento.status)}">${textoSeguro(obterRotuloStatus(equipamento.status, equipamento))}</span>
       <span>${textoSeguro(equipamento.observacao || "-")}</span>
       <button class="btn-editar" onclick="editarEquipamentoCodificado('${codificarParametro(JSON.stringify(equipamento))}')">Editar</button>
       <button class="btn-excluir" onclick="excluirEquipamento(decodeURIComponent('${codificarParametro(equipamento.frota)}'))">Excluir</button>
@@ -1626,7 +1753,7 @@ function renderizarFrentesDeColheita() {
     const vinculados = obterEquipamentosDaFrente(frente.frota);
     const colhedoras = vinculados.filter(equipamento => tipoPertenceAba(equipamento.tipo, "COLHEDORAS_TRANSBORDOS") && normalizarTexto(equipamento.tipo).includes("colhedora"));
     const transbordos = vinculados.filter(equipamento => normalizarTexto(equipamento.tipo).includes("transbordo"));
-    const pendentes = vinculados.filter(equipamento => equipamento.status === "PENDENTE").length;
+    const pendentes = vinculados.filter(equipamento => ehStatusIndisponivel(equipamento.status)).length;
 
     return `
       <div class="frente-card">
@@ -1679,8 +1806,8 @@ async function carregarEquipamentos() {
 
 function preencherResumo(equipamentos) {
   const total = equipamentos.length;
-  const ok = equipamentos.filter(e => e.status === "OK").length;
-  const pendentes = equipamentos.filter(e => e.status === "PENDENTE").length;
+  const ok = equipamentos.filter(e => ehStatusOk(e.status)).length;
+  const pendentes = equipamentos.filter(e => ehStatusIndisponivel(e.status)).length;
 
   document.getElementById("total").innerText = total;
   document.getElementById("ok").innerText = ok;
@@ -1707,7 +1834,7 @@ function preencherTabela(equipamentos) {
   <td><strong>${textoSeguro(e.frota)}</strong></td>
   <td>${textoSeguro(e.tipo || "-")}</td>
   <td>${textoSeguro(e.placa || "-")}</td>
-  <td class="${e.status === "OK" ? "status-ok" : "status-pendente"}">${e.status}</td>
+  <td class="${obterClasseStatus(e.status)}">${textoSeguro(obterRotuloStatus(e.status, e))}</td>
   <td>${textoSeguro(e.observacao || "-")}</td>
   <td>${textoSeguro(e.numero_os || "-")}</td>
   <td>${formatarDataHora(e.data_parado)}</td>
@@ -1745,8 +1872,8 @@ async function gerarRelatorio() {
     const descricao = obterDescricaoAcaoAtual();
     const equipamentosDaAba = obterEquipamentosParaIndicadores(equipamentos || []);
     const total = equipamentosDaAba.length;
-    const ok = equipamentosDaAba.filter(e => e.status === "OK").length;
-    const pendentesLista = equipamentosDaAba.filter(e => e.status === "PENDENTE");
+    const ok = equipamentosDaAba.filter(e => ehStatusOk(e.status)).length;
+    const pendentesLista = equipamentosDaAba.filter(e => ehStatusIndisponivel(e.status));
 
     const pendentesComPrevisao = pendentesLista.filter(e =>
       e.previsao_saida && e.previsao_saida.trim() !== ""
@@ -1766,18 +1893,19 @@ async function gerarRelatorio() {
 
     texto += "RESUMO:\n";
     texto += `Total ativos: ${total}\n`;
-    texto += `OK: ${ok}\n`;
-    texto += `Pendentes: ${pendentes}\n`;
+    texto += `Disponíveis: ${ok}\n`;
+    texto += `Indisponíveis: ${pendentes}\n`;
     texto += `Sem previsão: ${semPrevisao}\n\n`;
 
-    texto += "PENDENTES COM PREVISÃO:\n\n";
+    texto += "INDISPONÍVEIS COM PREVISÃO:\n\n";
 
     if (pendentesComPrevisao.length === 0) {
-      texto += `Nenhum ${descricao.singular} pendente com previsão no momento.\n\n`;
+      texto += `Nenhum ${descricao.singular} indisponível com previsão no momento.\n\n`;
     }
 
     pendentesComPrevisao.forEach(e => {
   texto += `🛑 ${e.frota}\n`;
+  texto += `Status: ${obterRotuloStatus(e.status, e)}\n`;
   texto += `Problema: ${e.observacao || "Sem observação"}\n`;
   texto += `O.S: ${e.numero_os || "Não informada"}\n`;
   texto += `Previsão: ${e.previsao_saida || "Sem previsão"}\n\n`;
@@ -1786,11 +1914,12 @@ async function gerarRelatorio() {
     texto += "\nSEM PREVISÃO:\n\n";
 
     if (pendentesSemPrevisao.length === 0) {
-      texto += `Nenhum ${descricao.singular} pendente sem previsão.\n`;
+      texto += `Nenhum ${descricao.singular} indisponível sem previsão.\n`;
     }
 
    pendentesSemPrevisao.forEach(e => {
   texto += `🛑 ${e.frota}\n`;
+  texto += `Status: ${obterRotuloStatus(e.status, e)}\n`;
   texto += `Problema: ${e.observacao || "Sem observação"}\n`;
   texto += `O.S: ${e.numero_os || "Não informada"}\n`;
   texto += `Previsão: Sem previsão\n\n`;
@@ -1918,6 +2047,8 @@ if (pareceLista) {
   "liberadas",
   "liberar",
   "ok",
+  "disponível",
+  "disponivel",
   "pronto",
   "pronta",
   "saiu",
@@ -1925,9 +2056,11 @@ if (pareceLista) {
   "sairam"
 ];
     const palavrasPendente = ["parado", "pendente", "manutenção", "manutencao", "oficina"];
+    const palavrasEmprestimo = ["empréstimo", "emprestimo", "emprestado", "emprestada"];
 
     const querLiberar = palavrasLiberado.some(p => texto.includes(p));
     const querParar = palavrasPendente.some(p => texto.includes(p));
+    const querEmprestimo = palavrasEmprestimo.some(p => texto.includes(p));
     const horarioInformado = extrairDataHoraParadaDaMensagem(mensagem);
 
     const querRemoverPrevisao =
@@ -1938,7 +2071,7 @@ if (pareceLista) {
 
     const matchOSRapida = mensagem.match(/(?:alterar\s*)?(?:os|o\.s|o\.s\.|ordem)\s*(?:para|pra|:|-)?\s*(\d+)/i);
 
-    if (!querLiberar && !querParar && (querRemoverPrevisao || matchPrevisaoRapida || matchOSRapida)) {
+    if (!querLiberar && !querParar && !querEmprestimo && (querRemoverPrevisao || matchPrevisaoRapida || matchOSRapida)) {
       await processarAlteracaoRapida({
         equipamento,
         frota,
@@ -1953,16 +2086,46 @@ if (pareceLista) {
       return;
     }
 
-    if (!querLiberar && !querParar) {
+    if (!querLiberar && !querParar && !querEmprestimo) {
       respostaChat.innerText =
         "Não entendi o comando.\n\n" +
         "Exemplos:\n" +
         "6242 liberado às 10:00\n" +
+        "6388 empréstimo às 08:00\n" +
         "6242 parado desde ontem 14h30 trocar travessas OS 3000 previsão amanhã 08h\n" +
         "liberar todos da frente 01\n" +
         "6242 previsão hoje 16h\n" +
         "6242 sem previsão\n" +
         "6242 OS 4500";
+      return;
+    }
+
+    if (querEmprestimo) {
+      if (!equipamentoEhCaminhaoProprio(equipamento)) {
+        respostaChat.innerText = "A opção Empréstimo está disponível somente para caminhões próprios.";
+        input.value = "";
+        return;
+      }
+
+      if (ehStatusEmprestimo(equipamento.status)) {
+        respostaChat.innerText = `Caminhão ${frota} já está em empréstimo. Nenhuma alteração foi feita.`;
+        input.value = "";
+        return;
+      }
+
+      if (!horarioInformado && abrirModalHorarioAgente({
+        equipamento,
+        frota,
+        mensagem,
+        acao: "emprestimo",
+        respostaChat
+      })) {
+        input.value = "";
+        return;
+      }
+
+      await registrarEmprestimoPeloChat(equipamento, frota, mensagem, respostaChat);
+      input.value = "";
       return;
     }
 
@@ -2625,20 +2788,20 @@ async function salvarEdicaoEquipamento() {
 
     let observacaoHistorico = observacao || "";
 
-    if (status === "PENDENTE") {
+    if (ehStatusIndisponivel(status)) {
       dadosEdicao.data_parado = dataParadoInformada || equipamentoAtual.data_parado || obterAgoraISO();
 
-      if (equipamentoAtual.status !== "PENDENTE") {
-        observacaoHistorico = observacaoHistorico || `Parado em ${formatarDataHora(dadosEdicao.data_parado)}`;
+      if (!ehStatusIndisponivel(equipamentoAtual.status)) {
+        const acaoStatus = ehStatusEmprestimo(status) ? "Empréstimo iniciado" : "Parado";
+        observacaoHistorico = observacaoHistorico || `${acaoStatus} em ${formatarDataHora(dadosEdicao.data_parado)}`;
       }
 
       if (
-        equipamentoAtual.status === "PENDENTE" &&
+        ehStatusIndisponivel(equipamentoAtual.status) &&
         dataParadoInformada &&
         dataParadoInformada !== equipamentoAtual.data_parado
       ) {
-        observacaoHistorico = observacaoHistorico ||
-          `Ajustou parada para ${formatarDataHora(dataParadoInformada)}`;
+        observacaoHistorico = observacaoHistorico || `Ajustou início para ${formatarDataHora(dataParadoInformada)}`;
       }
 
       observacaoHistorico = anexarDataParadaAoTexto(observacaoHistorico, dadosEdicao.data_parado);
@@ -2648,7 +2811,7 @@ async function salvarEdicaoEquipamento() {
       const equipamentoParaLiberacao = dataParadoInformada
         ? { ...equipamentoAtual, data_parado: dataParadoInformada }
         : equipamentoAtual;
-      const resumoLiberacao = equipamentoAtual.status === "PENDENTE"
+      const resumoLiberacao = ehStatusIndisponivel(equipamentoAtual.status)
         ? obterResumoLiberacao(equipamentoParaLiberacao, new Date())
         : null;
 
@@ -2699,23 +2862,28 @@ async function salvarEdicaoEquipamento() {
 }
 
 function renderizarGraficoStatus(equipamentos) {
-  const ok = equipamentos.filter(e => e.status === "OK").length;
-  const pendentes = equipamentos.filter(e => e.status === "PENDENTE").length;
+  const ok = equipamentos.filter(e => ehStatusOk(e.status)).length;
+  const pendentes = equipamentos.filter(e => ehStatusPendente(e.status)).length;
+  const emprestimos = equipamentos.filter(e => ehStatusEmprestimo(e.status)).length;
+  const indisponiveis = pendentes + emprestimos;
   const total = equipamentos.length;
 
   const percentualOk = total > 0 ? ((ok / total) * 100).toFixed(1) : 0;
-  const percentualPendente = total > 0 ? ((pendentes / total) * 100).toFixed(1) : 0;
+  const percentualPendente = total > 0 ? ((indisponiveis / total) * 100).toFixed(1) : 0;
 
   const percentualOkTexto = document.getElementById("percentual-ok");
   const percentualPendenteTexto = document.getElementById("percentual-pendente");
   const descricao = obterDescricaoAcaoAtual();
+  const temEmprestimos = emprestimos > 0;
 
   if (percentualOkTexto) {
-    percentualOkTexto.innerText = `OK: ${ok} ${descricao.plural} - ${percentualOk}%`;
+    percentualOkTexto.innerText = `Disponíveis: ${ok} ${descricao.plural} - ${percentualOk}%`;
   }
 
   if (percentualPendenteTexto) {
-    percentualPendenteTexto.innerText = `Pendentes: ${pendentes} ${descricao.plural} - ${percentualPendente}%`;
+    percentualPendenteTexto.innerText = temEmprestimos
+      ? `Parados: ${pendentes} | Empréstimo: ${emprestimos} - ${percentualPendente}%`
+      : `Pendentes: ${pendentes} ${descricao.plural} - ${percentualPendente}%`;
   }
 
   const canvas = document.getElementById("graficoStatus");
@@ -2734,11 +2902,11 @@ function renderizarGraficoStatus(equipamentos) {
   graficoStatus = new Chart(ctx, {
     type: "pie",
     data: {
-      labels: ["OK", "Pendentes"],
+      labels: temEmprestimos ? ["Disponíveis", "Parados", "Empréstimo"] : ["Disponíveis", "Parados"],
       datasets: [
         {
-          data: [ok, pendentes],
-          backgroundColor: ["#22c55e", "#ef4444"],
+          data: temEmprestimos ? [ok, pendentes, emprestimos] : [ok, pendentes],
+          backgroundColor: temEmprestimos ? ["#22c55e", "#ef4444", "#f59e0b"] : ["#22c55e", "#ef4444"],
           borderWidth: 1
         }
       ]
@@ -2914,6 +3082,76 @@ async function liberarReboquePeloChat(equipamento, frota, mensagem, respostaChat
     `Parada: ${resumoLiberacao.parada ? formatarDataHora(resumoLiberacao.parada) : "Não registrada"}\n` +
     `Início: ${formatarDataHora(retorno)}${retornoInformado ? " (informado no agente)" : ""}\n` +
     `Tempo parado: ${formatarDuracao(resumoLiberacao.tempoMs)}`;
+
+  await carregarEquipamentos();
+  await carregarHistorico();
+  await gerarRelatorio();
+}
+
+async function registrarEmprestimoPeloChat(equipamento, frota, mensagem, respostaChat) {
+  if (!equipamentoEhCaminhaoProprio(equipamento)) {
+    respostaChat.innerText = "A opção Empréstimo está disponível somente para caminhões próprios.";
+    return;
+  }
+
+  if (ehStatusEmprestimo(equipamento.status)) {
+    respostaChat.innerText = `Caminhão ${frota} já está em empréstimo. Nenhuma alteração foi feita.`;
+    return;
+  }
+
+  let motivo = mensagem;
+  const emprestimoInformado = extrairDataHoraParadaDaMensagem(mensagem);
+
+  if (emprestimoInformado) {
+    motivo = limparTrechoDataParada(motivo, emprestimoInformado.textoEncontrado);
+  }
+
+  motivo = motivo.replace(new RegExp(frota, "g"), "");
+  motivo = motivo.replace(/caminh[aã]o pr[oó]prio|caminh[aã]o|emprestado|emprestada|empr[eé]stimo/gi, "");
+  motivo = motivo.replace(/\s+/g, " ").trim();
+
+  if (!motivo) {
+    motivo = "Empréstimo";
+  }
+
+  const dataEmprestimo = emprestimoInformado?.iso || obterAgoraISO();
+
+  const { error } = await supabaseClient
+    .from("equipamentos")
+    .update({
+      status: "EMPRESTIMO",
+      observacao: motivo,
+      numero_os: "",
+      data_parado: dataEmprestimo,
+      previsao_saida: "",
+      updated_at: dataEmprestimo
+    })
+    .eq("frota", frota);
+
+  if (error) {
+    console.error("Erro ao registrar empréstimo:", error);
+    respostaChat.innerText = "Erro ao registrar caminhão em empréstimo.";
+    return;
+  }
+
+  await supabaseClient
+    .from("historico_movimentacoes")
+    .insert({
+      frota,
+      acao: "EMPRESTIMO",
+      status_anterior: equipamento.status || "",
+      status_novo: "EMPRESTIMO",
+      observacao_anterior: equipamento.observacao || "",
+      observacao_nova: anexarDataParadaAoTexto(motivo, dataEmprestimo),
+      numero_os: "",
+      previsao_saida: "",
+      mensagem_original: mensagem
+    });
+
+  respostaChat.innerText =
+    `Caminhão ${frota} registrado em EMPRÉSTIMO.\n\n` +
+    `Motivo: ${motivo}\n` +
+    `Início: ${formatarDataHora(dataEmprestimo)}${emprestimoInformado ? " (informado no agente)" : ""}`;
 
   await carregarEquipamentos();
   await carregarHistorico();
@@ -3292,7 +3530,7 @@ async function confirmarAcaoEmMassa(acao) {
         .from("equipamentos")
         .select("*")
         .eq("ativo", true)
-        .eq("status", "PENDENTE");
+        .in("status", ["PENDENTE", "EMPRESTIMO"]);
 
       if (erroBusca) {
         console.error("Erro ao buscar pendentes:", erroBusca);
@@ -3434,11 +3672,11 @@ function aplicarFiltroTabela() {
   let equipamentosFiltrados = equipamentosDaAba;
 
   if (filtroStatusAtual === "PENDENTE") {
-    equipamentosFiltrados = equipamentosDaAba.filter(e => e.status === "PENDENTE");
+    equipamentosFiltrados = equipamentosDaAba.filter(e => ehStatusIndisponivel(e.status));
   }
 
   if (filtroStatusAtual === "OK") {
-    equipamentosFiltrados = equipamentosDaAba.filter(e => e.status === "OK");
+    equipamentosFiltrados = equipamentosDaAba.filter(e => ehStatusOk(e.status));
   }
 
   preencherTabela(equipamentosFiltrados);
