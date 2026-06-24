@@ -120,6 +120,26 @@
     Selecione uma data para calcular a disponibilidade.
   </p>
 
+  <div class="disponibilidade-lancamento">
+    <div>
+      <h3>Lançar horas paradas no dia</h3>
+      <p>Informe apenas o total parado da frota na data selecionada.</p>
+    </div>
+
+    <div class="disponibilidade-lancamento-grid">
+      <select id="disp-lanc-frota" aria-label="Frota para lançamento">
+        <option value="">Selecione a frota</option>
+      </select>
+      <input type="date" id="disp-lanc-data" aria-label="Data do lançamento">
+      <input type="number" id="disp-lanc-horas" min="0" max="24" step="1" placeholder="Horas">
+      <input type="number" id="disp-lanc-minutos" min="0" max="59" step="1" placeholder="Min">
+      <input type="text" id="disp-lanc-motivo" placeholder="Motivo opcional">
+      <button onclick="salvarLancamentoDisponibilidadeManual()">Lançar</button>
+    </div>
+
+    <p id="disp-lanc-mensagem" class="grafico-legenda">Ex: frota 6963, 24 horas, dia 23/06/2026.</p>
+  </div>
+
   <div class="disponibilidade-graficos">
     <div class="disponibilidade-grafico-card">
       <h3>Disponibilidade Geral</h3>
