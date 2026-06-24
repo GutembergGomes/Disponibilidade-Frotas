@@ -679,6 +679,47 @@ td.status-emprestimo {
   margin-top: 18px;
 }
 
+.disponibilidade-lancamento {
+  display: grid;
+  gap: 14px;
+  margin: 18px 0;
+  padding: 16px;
+  background: var(--surface-soft);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  box-shadow: var(--shadow-soft);
+}
+
+.disponibilidade-lancamento h3 {
+  margin: 0 0 4px 0;
+  font-size: 17px;
+}
+
+.disponibilidade-lancamento p {
+  margin: 0;
+  color: var(--muted);
+  font-weight: 750;
+}
+
+.disponibilidade-lancamento-grid {
+  display: grid;
+  grid-template-columns: minmax(160px, 1.2fr) minmax(140px, 0.8fr) minmax(92px, 0.5fr) minmax(84px, 0.45fr) minmax(180px, 1.4fr) auto;
+  gap: 10px;
+  align-items: center;
+}
+
+.disponibilidade-lancamento-grid input,
+.disponibilidade-lancamento-grid select {
+  width: 100%;
+  min-height: 44px;
+  padding: 10px 12px;
+  background: var(--surface);
+  color: var(--text);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius);
+  font: inherit;
+}
+
 .disponibilidade-graficos {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
@@ -1078,7 +1119,8 @@ body.dark-mode th {
   .disponibilidade-graficos,
   .frentes-formularios,
   .frente-grupos,
-  .disponibilidade-tipos {
+  .disponibilidade-tipos,
+  .disponibilidade-lancamento-grid {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
@@ -1119,6 +1161,7 @@ body.dark-mode th {
   .frentes-formularios,
   .frente-grupos,
   .disponibilidade-tipos,
+  .disponibilidade-lancamento-grid,
   .disponibilidade-frente-metricas {
     grid-template-columns: 1fr;
   }
