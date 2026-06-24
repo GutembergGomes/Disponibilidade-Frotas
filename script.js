@@ -303,6 +303,52 @@ function extrairDataHoraParadaDaMensagem(mensagem) {
   };
 }
 
+function extrairParadaDiaInteiroDaMensagem(mensagem) {
+  const texto = (mensagem || "").toString();
+  const marcador = texto.match(/(?:24\s*(?:horas?|h)\b|dia\s+inteiro|o\s+dia\s+todo|todo\s+o\s+dia|parada\s+do\s+dia)/i);
+
+  if (!marcador) {
+    return null;
+  }
+
+  const dataMatch = texto.match(/\b(hoje|ontem|\d{1,2}\/\d{1,2}(?:\/\d{2,4})?|\d{4}-\d{2}-\d{2})\b/i);
+  const dataBase = interpretarDataParadaTexto(dataMatch ? dataMatch[1] : "hoje");
+
+  if (!dataBase) {
+    return null;
+  }
+
+  const inicio = new Date(dataBase.getFullYear(), dataBase.getMonth(), dataBase.getDate(), 0, 0, 0, 0);
+  const fim = new Date(dataBase.getFullYear(), dataBase.getMonth(), dataBase.getDate() + 1, 0, 0, 0, 0);
+
+  return {
+    dataISO: obterDataLocalISO(inicio),
+    inicio,
+    fim,
+    textoData: dataMatch ? dataMatch[0] : "",
+    textoMarcador: marcador[0]
+  };
+}
+
+function limparMensagemParadaDiaInteiro(mensagem, frota, paradaDiaInteiro) {
+  let motivo = mensagem || "";
+
+  if (paradaDiaInteiro?.textoMarcador) {
+    motivo = motivo.replace(paradaDiaInteiro.textoMarcador, "");
+  }
+
+  if (paradaDiaInteiro?.textoData) {
+    motivo = motivo.replace(paradaDiaInteiro.textoData, "");
+  }
+
+  return motivo
+    .replace(new RegExp(frota, "gi"), "")
+    .replace(/reboque|frente de colheita|frente|colhedora|transbordo|caminh[aã]o pr[oó]prio|caminh[aã]o/gi, "")
+    .replace(/parado|pendente|manutenção|manutencao|oficina|ficou|dia inteiro|o dia todo|todo o dia|parada do dia/gi, "")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
 function limparTrechoDataParada(texto, trecho) {
   if (!trecho) {
     return texto;
@@ -741,7 +787,7 @@ function atualizarCabecalhosDaAba() {
 
   if (mensagemChat) {
     mensagemChat.placeholder = estaNaAbaAgente()
-      ? "Ex: C2001 parado desde 07:30 vazamento OS 4550 previsão 14:00, T3001 liberado às 10:00, liberar todos da frente 01..."
+      ? "Ex: C2001 parado desde 07:30, 6963 parado 24 horas, T3001 liberado às 10:00, liberar todos da frente 01..."
       : `Digite uma atualização ou cole uma lista de ${config.plural} pendentes...`;
   }
 
@@ -1210,14 +1256,20 @@ function obterResumoLiberacao(equipamento, retorno = new Date()) {
 
 function inicializarDataDisponibilidade() {
   const input = document.getElementById("data-disponibilidade");
+  const inputLancamento = document.getElementById("disp-lanc-data");
 
   if (input && !input.value) {
     input.value = obterDataLocalISO();
+  }
+
+  if (inputLancamento && !inputLancamento.value) {
+    inputLancamento.value = input?.value || obterDataLocalISO();
   }
 }
 
 function atualizarDisponibilidadeDia() {
   const inputData = document.getElementById("data-disponibilidade");
+  const inputLancamento = document.getElementById("disp-lanc-data");
   const tbody = document.getElementById("tabela-disponibilidade");
   const totalEquipamentos = document.getElementById("disp-equipamentos");
   const tempoParado = document.getElementById("disp-tempo-parado");
@@ -1233,6 +1285,11 @@ function atualizarDisponibilidadeDia() {
   }
 
   const dataISO = inputData.value;
+
+  if (inputLancamento && !inputLancamento.value) {
+    inputLancamento.value = dataISO;
+  }
+
   const equipamentosBase = estaNaAbaDisponibilidade()
     ? obterEquipamentosParaDisponibilidade()
     : obterEquipamentosParaIndicadores();
@@ -1283,6 +1340,212 @@ function atualizarDisponibilidadeDia() {
       <td>${calculo.disponibilidade.toFixed(1)}%</td>
     </tr>
   `).join("");
+}
+
+function preencherSelectLancamentoDisponibilidade() {
+  const select = document.getElementById("disp-lanc-frota");
+
+  if (!select) {
+    return;
+  }
+
+  const valorAtual = select.value;
+  const equipamentos = obterEquipamentosParaDisponibilidade()
+    .slice()
+    .sort((a, b) => (a.frota || "").localeCompare(b.frota || "", "pt-BR", { numeric: true }));
+
+  select.innerHTML = `<option value="">Selecione a frota</option>`;
+
+  equipamentos.forEach(equipamento => {
+    const option = document.createElement("option");
+    option.value = equipamento.frota;
+    option.textContent = `${equipamento.frota} - ${equipamento.tipo || "Equipamento"}`;
+    select.appendChild(option);
+  });
+
+  if (equipamentos.some(equipamento => equipamento.frota === valorAtual)) {
+    select.value = valorAtual;
+  }
+}
+
+function obterInicioDiaPorISO(dataISO) {
+  const [ano, mes, dia] = (dataISO || "").split("-").map(Number);
+
+  if (!ano || !mes || !dia) {
+    return null;
+  }
+
+  const data = new Date(ano, mes - 1, dia, 0, 0, 0, 0);
+
+  return Number.isNaN(data.getTime()) ? null : data;
+}
+
+function existeLancamentoManualDisponibilidade(frota, dataISO) {
+  return historicoCarregado.some(item =>
+    item.frota === frota &&
+    normalizarTexto(item.acao || "").includes("disponibilidade_manual") &&
+    historicoPertenceAoDia(item, dataISO)
+  );
+}
+
+function obterMinutosLancamentoDisponibilidade() {
+  const horas = Number(document.getElementById("disp-lanc-horas")?.value || 0);
+  const minutos = Number(document.getElementById("disp-lanc-minutos")?.value || 0);
+
+  if (!Number.isFinite(horas) || !Number.isFinite(minutos)) {
+    return 0;
+  }
+
+  return Math.max(0, Math.round(horas * 60 + minutos));
+}
+
+async function salvarLancamentoDisponibilidadeManual() {
+  const selectFrota = document.getElementById("disp-lanc-frota");
+  const inputData = document.getElementById("disp-lanc-data");
+  const inputMotivo = document.getElementById("disp-lanc-motivo");
+  const mensagem = document.getElementById("disp-lanc-mensagem");
+  const frota = selectFrota?.value || "";
+  const dataISO = inputData?.value || obterDataDisponibilidadeSelecionada();
+  const minutosParados = obterMinutosLancamentoDisponibilidade();
+
+  if (!frota) {
+    alert("Selecione a frota para lançar a indisponibilidade.");
+    return;
+  }
+
+  const equipamento = equipamentosCarregados.find(item => item.frota === frota);
+
+  if (!equipamento) {
+    alert("Frota não encontrada na lista carregada.");
+    return;
+  }
+
+  if (!dataISO) {
+    alert("Informe a data do lançamento.");
+    return;
+  }
+
+  if (dataISO > obterDataLocalISO()) {
+    alert("Não é possível lançar indisponibilidade para uma data futura.");
+    return;
+  }
+
+  if (minutosParados <= 0) {
+    alert("Informe pelo menos 1 minuto parado.");
+    return;
+  }
+
+  if (minutosParados > 1440) {
+    alert("O máximo permitido é 24 horas no mesmo dia.");
+    return;
+  }
+
+  if (existeLancamentoManualDisponibilidade(frota, dataISO)) {
+    alert("Já existe lançamento manual de disponibilidade para esta frota nesta data. Clique na frota, edite ou exclua o lançamento existente.");
+    return;
+  }
+
+  const registrosDoDia = obterHistoricosOperacionaisDaFrota(frota, dataISO);
+
+  if (registrosDoDia.length > 0) {
+    const continuar = confirm(
+      `A frota ${frota} já tem ${registrosDoDia.length} lançamento(s) nesse dia.\n\n` +
+      "Se continuar, esse tempo pode somar com registros existentes. Deseja lançar mesmo assim?"
+    );
+
+    if (!continuar) {
+      return;
+    }
+  }
+
+  const inicio = obterInicioDiaPorISO(dataISO);
+
+  if (!inicio) {
+    alert("Data inválida para o lançamento.");
+    return;
+  }
+
+  const fimCalculado = new Date(inicio.getTime() + minutosParados * 60000);
+  const fim = fimCalculado;
+  const inicioISO = inicio.toISOString();
+  const fimISO = fim.toISOString();
+  const motivo = inputMotivo?.value.trim() || "Indisponibilidade manual do dia";
+  const resumoLiberacao = obterResumoLiberacao({ ...equipamento, data_parado: inicioISO }, fim);
+  const payloadParada = {
+    frota,
+    acao: "DISPONIBILIDADE_MANUAL_PARADA",
+    status_anterior: equipamento.status || "",
+    status_novo: "PENDENTE",
+    observacao_anterior: equipamento.observacao || "",
+    observacao_nova: anexarDataParadaAoTexto(motivo, inicioISO),
+    numero_os: equipamento.numero_os || "",
+    previsao_saida: equipamento.previsao_saida || "",
+    mensagem_original: `Lançamento manual de disponibilidade: ${formatarDuracao(minutosParados * 60000)}`,
+    created_at: inicioISO
+  };
+  const payloadLiberacao = {
+    frota,
+    acao: "DISPONIBILIDADE_MANUAL_LIBERACAO",
+    status_anterior: "PENDENTE",
+    status_novo: "OK",
+    observacao_anterior: motivo,
+    observacao_nova: resumoLiberacao.texto,
+    numero_os: equipamento.numero_os || "",
+    previsao_saida: "",
+    mensagem_original: `Fechamento manual de disponibilidade: ${formatarDuracao(minutosParados * 60000)}`,
+    created_at: fimISO
+  };
+
+  try {
+    const duplicadoParada = await buscarLancamentoDuplicado(payloadParada);
+    const duplicadoLiberacao = await buscarLancamentoDuplicado(payloadLiberacao);
+
+    if (duplicadoParada || duplicadoLiberacao) {
+      alert("Já existe lançamento para esta frota no mesmo horário de início ou fim. Edite/exclua o registro existente antes de lançar novamente.");
+      return;
+    }
+
+    const parada = await inserirHistoricoSemDuplicidade(payloadParada);
+
+    if (parada.duplicado) {
+      alert("Já existe lançamento de parada para esta frota nesse horário.");
+      return;
+    }
+
+    if (parada.error && !parada.duplicado) {
+      console.error("Erro ao lançar indisponibilidade manual:", parada.error);
+      alert("Erro ao lançar a indisponibilidade.");
+      return;
+    }
+
+    const liberacao = await inserirHistoricoSemDuplicidade(payloadLiberacao);
+
+    if (liberacao.duplicado) {
+      alert("A parada foi lançada, mas já existia liberação no mesmo horário. Abra os registros da frota para revisar.");
+      return;
+    }
+
+    if (liberacao.error && !liberacao.duplicado) {
+      console.error("Erro ao fechar indisponibilidade manual:", liberacao.error);
+      alert("A parada foi lançada, mas houve erro ao lançar a liberação automática.");
+      return;
+    }
+
+    if (mensagem) {
+      mensagem.innerText =
+        `Lançado: frota ${frota}, ${formatarDuracao(minutosParados * 60000)} parada em ${dataISO.split("-").reverse().join("/")}.`;
+    }
+
+    document.getElementById("disp-lanc-horas").value = "";
+    document.getElementById("disp-lanc-minutos").value = "";
+
+    await carregarHistorico();
+    await gerarRelatorio();
+
+  } catch (erro) {
+    console.error(erro);
+    alert("Erro ao lançar indisponibilidade manual.");
+  }
 }
 
 function calcularDisponibilidadeEquipamentos(equipamentos, dataISO) {
@@ -1385,7 +1648,19 @@ function historicoPertenceAoDia(item, dataISO) {
   const { inicio, fim } = obterIntervaloDia(dataISO);
   const dataReferencia = obterDataReferenciaHistorico(item);
 
-  return dataReferencia && dataReferencia >= inicio && dataReferencia <= fim;
+  if (dataReferencia && dataReferencia >= inicio && dataReferencia <= fim) {
+    return true;
+  }
+
+  if (
+    normalizarTexto(item.acao || "") === "disponibilidade_manual_liberacao" &&
+    ehStatusOk(item.status_novo)
+  ) {
+    const dataParada = extrairDataParadaDoHistorico(item);
+    return dataParada && dataParada >= inicio && dataParada <= fim;
+  }
+
+  return false;
 }
 
 function obterHistoricosOperacionaisDaFrota(frota, dataISO = "") {
@@ -1956,6 +2231,7 @@ async function carregarEquipamentos() {
     }
 
     equipamentosCarregados = equipamentos || [];
+    preencherSelectLancamentoDisponibilidade();
 
     atualizarTelaAtual();
 
@@ -2223,6 +2499,7 @@ if (pareceLista) {
     const querParar = palavrasPendente.some(p => texto.includes(p));
     const querEmprestimo = palavrasEmprestimo.some(p => texto.includes(p));
     const horarioInformado = extrairDataHoraParadaDaMensagem(mensagem);
+    const paradaDiaInteiro = querParar ? extrairParadaDiaInteiroDaMensagem(mensagem) : null;
 
     const querRemoverPrevisao =
       texto.includes("sem previsão") ||
@@ -2254,6 +2531,7 @@ if (pareceLista) {
         "6242 liberado às 10:00\n" +
         "6388 empréstimo às 08:00\n" +
         "6242 parado desde ontem 14h30 trocar travessas OS 3000 previsão amanhã 08h\n" +
+        "6963 parado 24 horas\n" +
         "liberar todos da frente 01\n" +
         "6242 previsão hoje 16h\n" +
         "6242 sem previsão\n" +
@@ -2308,6 +2586,12 @@ if (pareceLista) {
     }
 
     if (querParar) {
+      if (paradaDiaInteiro) {
+        await registrarParadaDiaInteiroPeloChat(equipamento, frota, mensagem, paradaDiaInteiro, respostaChat);
+        input.value = "";
+        return;
+      }
+
       if (!horarioInformado && abrirModalHorarioAgente({
         equipamento,
         frota,
@@ -3764,6 +4048,94 @@ async function registrarEmprestimoPeloChat(equipamento, frota, mensagem, respost
     `Caminhão ${frota} registrado em EMPRÉSTIMO.${duplicado ? "\nO histórico não foi duplicado porque já existia lançamento neste horário." : ""}\n\n` +
     `Motivo: ${motivo}\n` +
     `Início: ${formatarDataHora(dataEmprestimo)}${emprestimoInformado ? " (informado no agente)" : ""}`;
+
+  await carregarEquipamentos();
+  await carregarHistorico();
+  await gerarRelatorio();
+}
+
+async function registrarParadaDiaInteiroPeloChat(equipamento, frota, mensagem, paradaDiaInteiro, respostaChat) {
+  const nomeSingular = obterNomeSingular(equipamento);
+  const hojeISO = obterDataLocalISO();
+  const inicioISO = paradaDiaInteiro.inicio.toISOString();
+  const fimISO = paradaDiaInteiro.fim.toISOString();
+  const diaTexto = paradaDiaInteiro.dataISO.split("-").reverse().join("/");
+
+  if (paradaDiaInteiro.dataISO > hojeISO) {
+    respostaChat.innerText = "Não é possível lançar parada de 24 horas para uma data futura.";
+    return;
+  }
+
+  const motivo = limparMensagemParadaDiaInteiro(mensagem, frota, paradaDiaInteiro) || "Parada do dia inteiro";
+  const paradaHistorico = await inserirHistoricoSemDuplicidade({
+    frota,
+    acao: "PARADA_DIA_INTEIRO",
+    status_anterior: equipamento.status || "",
+    status_novo: "PENDENTE",
+    observacao_anterior: equipamento.observacao || "",
+    observacao_nova: anexarDataParadaAoTexto(motivo, inicioISO),
+    numero_os: equipamento.numero_os || "",
+    previsao_saida: equipamento.previsao_saida || "",
+    mensagem_original: mensagem,
+    created_at: inicioISO
+  });
+
+  if (paradaHistorico.error && !paradaHistorico.duplicado) {
+    console.error("Erro ao registrar parada do dia inteiro:", paradaHistorico.error);
+    respostaChat.innerText = "Erro ao registrar a parada de 24 horas no histórico.";
+    return;
+  }
+
+  let liberacaoHistorico = null;
+
+  if (paradaDiaInteiro.dataISO < hojeISO) {
+    const resumoLiberacao = obterResumoLiberacao(
+      { ...equipamento, data_parado: inicioISO },
+      paradaDiaInteiro.fim
+    );
+
+    liberacaoHistorico = await inserirHistoricoSemDuplicidade({
+      frota,
+      acao: "LIBEROU_DIA_INTEIRO",
+      status_anterior: "PENDENTE",
+      status_novo: "OK",
+      observacao_anterior: motivo,
+      observacao_nova: resumoLiberacao.texto,
+      numero_os: equipamento.numero_os || "",
+      previsao_saida: "",
+      mensagem_original: mensagem,
+      created_at: fimISO
+    });
+
+    if (liberacaoHistorico.error && !liberacaoHistorico.duplicado) {
+      console.error("Erro ao registrar liberação do dia inteiro:", liberacaoHistorico.error);
+      respostaChat.innerText = "A parada foi registrada, mas houve erro ao registrar a liberação automática do dia.";
+      return;
+    }
+  } else {
+    const { error } = await supabaseClient
+      .from("equipamentos")
+      .update({
+        status: "PENDENTE",
+        observacao: motivo,
+        data_parado: inicioISO,
+        updated_at: inicioISO
+      })
+      .eq("frota", frota);
+
+    if (error) {
+      console.error("Erro ao atualizar equipamento para parada do dia inteiro:", error);
+      respostaChat.innerText = "A parada foi registrada no histórico, mas houve erro ao atualizar o status atual do equipamento.";
+      return;
+    }
+  }
+
+  respostaChat.innerText =
+    `${capitalizar(nomeSingular)} ${frota} registrado com parada de 24 horas no dia ${diaTexto}.\n\n` +
+    `Motivo: ${motivo}\n` +
+    `Início: ${formatarDataHora(inicioISO)}\n` +
+    `${paradaDiaInteiro.dataISO < hojeISO ? `Liberação automática: ${formatarDataHora(fimISO)}\n` : "Status atual: permanece PENDENTE desde 00:00\n"}` +
+    `${paradaHistorico.duplicado || liberacaoHistorico?.duplicado ? "\nO histórico não foi duplicado onde já existia lançamento no mesmo horário." : ""}`;
 
   await carregarEquipamentos();
   await carregarHistorico();
